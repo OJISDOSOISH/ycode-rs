@@ -35,7 +35,12 @@ pub struct Entry {
 }
 
 impl Entry {
-    fn is_system(&self) -> bool {
+    /// Message d'instructions systeme, plutot qu'un echange de conversation.
+    ///
+    /// Ces messages-la ont un traitement particulier : ils doivent survivre a
+    /// la compaction, et ne pas se retrouver dupliques apres un changement
+    /// d'epoch.
+    pub fn is_system(&self) -> bool {
         self.message.type_str() == "system"
     }
 }
@@ -77,8 +82,9 @@ pub struct Window {
 /// ne contienne pas deux fois les memes instructions systeme (une ancienne
 /// version, plus une recente). Un message systeme anterieur au curseur est donc
 /// masque, sauf s'il passe par la branche speciale de la premiere clause.
-fn is_visible(seq: i64, message: &Message, window: Window) -> bool {
-    let is_system = message.type_str() == "system";
+fn is_visible(entry: &Entry, window: Window) -> bool {
+    let seq = entry.seq;
+    let is_system = entry.is_system();
 
     let after_compaction = match window.compaction_seq {
         // Pas de compaction : la premiere contrainte ne retient rien.
@@ -88,7 +94,7 @@ fn is_visible(seq: i64, message: &Message, window: Window) -> bool {
                 // Exception : les instructions systeme de l'epoch courante
                 // survivent a la compaction, sinon l'agent perdrait ses
                 // consignes en plein vol.
-                || (window.baseline.is_some() && is_system && seq > window.baseline.map(|b| b.0).unwrap())
+                || window.baseline.is_some_and(|b| is_system && seq > b.0)
         }
     };
 
@@ -112,7 +118,7 @@ fn is_visible(seq: i64, message: &Message, window: Window) -> bool {
 pub fn load(entries: &[Entry], window: Window) -> Vec<Message> {
     entries
         .iter()
-        .filter(|e| is_visible(e.seq, &e.message, window))
+        .filter(|e| is_visible(e, window))
         .map(|e| e.message.clone())
         .collect()
 }
@@ -122,7 +128,7 @@ pub fn load(entries: &[Entry], window: Window) -> Vec<Message> {
 pub fn entries_for_runner(entries: &[Entry], window: Window) -> Vec<Entry> {
     entries
         .iter()
-        .filter(|e| is_visible(e.seq, &e.message, window))
+        .filter(|e| is_visible(e, window))
         .cloned()
         .collect()
 }
@@ -265,4 +271,5 @@ mod tests {
         assert_eq!(seqs, vec![1, 2, 3]);
     }
 }
+
 
