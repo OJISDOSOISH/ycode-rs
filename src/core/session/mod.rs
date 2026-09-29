@@ -6,4 +6,5 @@
 pub mod compaction;
 pub mod context_epoch;
 pub mod history;
+pub mod revert;
 pub mod turn;
