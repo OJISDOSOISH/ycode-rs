@@ -3,4 +3,5 @@
 //! C'est ici que se joue la limite de contexte : `history` determine quels
 //! messages le modele voit reellement, en combinant compaction et epoch.
 
+pub mod context_epoch;
 pub mod history;
