@@ -8,4 +8,5 @@ pub mod core;
 pub mod schema;
 
 pub mod llm;
+pub mod permission;
 pub mod tool;

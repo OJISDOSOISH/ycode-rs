@@ -23,6 +23,6 @@ REGLES ABSOLUES
 LIVRABLE : le fichier Rust, ecrit sur le disque. Pas de reponse textuelle.
 
 ---
-SOURCE : C:\Users\AI\Projects\Ycode\opencode\packages\core\src\session\runner\max-steps.ts
-CIBLE   : C:\Users\AI\Projects\Ycode\ycode-rs\src\core\session\max_steps.rs
+SOURCE : C:\Users\AI\Projects\Ycode\opencode\packages\core\src\question.ts
+CIBLE   : C:\Users\AI\Projects\Ycode\ycode-rs\src\question.rs
 CHARTE  : C:\Users\AI\Projects\Ycode\ycode-rs\src\core\session\compaction.rs   (lis-le pour le style et le niveau de detail attendu)

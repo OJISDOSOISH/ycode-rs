@@ -23,6 +23,6 @@ REGLES ABSOLUES
 LIVRABLE : le fichier Rust, ecrit sur le disque. Pas de reponse textuelle.
 
 ---
-SOURCE : C:\Users\AI\Projects\Ycode\opencode\packages\core\src\session\todo.ts
-CIBLE   : C:\Users\AI\Projects\Ycode\ycode-rs\src\core\session\todo.rs
+SOURCE : C:\Users\AI\Projects\Ycode\opencode\packages\core\src\session\run-coordinator.ts
+CIBLE   : C:\Users\AI\Projects\Ycode\ycode-rs\src\core\session\run_coordinator.rs
 CHARTE  : C:\Users\AI\Projects\Ycode\ycode-rs\src\core\session\compaction.rs   (lis-le pour le style et le niveau de detail attendu)
