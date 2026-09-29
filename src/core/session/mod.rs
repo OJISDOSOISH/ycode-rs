@@ -1,0 +1,6 @@
+//! Une session, son historique, et la fenetre de contexte visible.
+//!
+//! C'est ici que se joue la limite de contexte : `history` determine quels
+//! messages le modele voit reellement, en combinant compaction et epoch.
+
+pub mod history;

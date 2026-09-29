@@ -4,6 +4,7 @@
 //! d'abord les schemas, parce que le session, les outils et le serveur les
 //! manipulent tous.
 
+pub mod core;
 pub mod schema;
 
 pub mod llm;
