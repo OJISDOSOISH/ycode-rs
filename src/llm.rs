@@ -54,6 +54,9 @@ impl WireMessage {
 }
 
 /// Description d'un outil, au format `tools` de l'API OpenAI.
+///
+/// Le `type: "function"` est obligatoire cote requete : l'API OpenAI-compatible
+/// attend `{"type":"function","function":{...}}` et refuse 400 sans lui.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolSpec {
     pub name: String,
@@ -61,12 +64,34 @@ pub struct ToolSpec {
     pub parameters: serde_json::Value,
 }
 
+impl ToolSpec {
+    fn to_wire(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": self.parameters,
+            }
+        })
+    }
+}
+
+/// Appel d'outil demande par le modele.
+///
+/// `kind` est `function` en pratique, mais l'API l'exige explicitement : sans
+/// lui, les backends OpenAI-compatibles repondent 400. C'est un champ que rien
+/// dans le code ne lit, ce qui le rend facile a oublier.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolCall {
     pub id: String,
-    #[serde(rename = "type")]
+    #[serde(rename = "type", default = "function_kind")]
     pub kind: String,
     pub function: ToolCallFunction,
+}
+
+fn function_kind() -> String {
+    "function".to_string()
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -107,7 +132,7 @@ struct ChatRequest<'a> {
     model: &'a str,
     messages: &'a [WireMessage],
     #[serde(skip_serializing_if = "Option::is_none")]
-    tools: Option<&'a [ToolSpec]>,
+    tools: Option<Vec<serde_json::Value>>,
     max_tokens: u32,
     temperature: f32,
     stream: bool,
@@ -176,7 +201,7 @@ impl Llm {
         let req = ChatRequest {
             model: &full_model,
             messages,
-            tools,
+            tools: tools.map(|t| t.iter().map(ToolSpec::to_wire).collect()),
             max_tokens,
             temperature,
             stream: false,

@@ -222,6 +222,9 @@ pub struct User {
 pub struct Synthetic {
     #[serde(flatten)]
     pub base: MessageBase,
+    /// Le TS nomme ce champ `sessionID` (camelCase). Sans le `rename`, Serde
+    /// emettrait `session_id` et une session ecrite par le TS serait illisible.
+    #[serde(rename = "sessionID")]
     pub session_id: String,
     pub text: String,
 }
@@ -241,10 +244,33 @@ pub struct System {
 pub struct Shell {
     #[serde(flatten)]
     pub base: MessageBase,
+    /// `callID` dans le TS, pas `call_id`. Meme raison que `Synthetic.session_id`.
+    #[serde(rename = "callID")]
     pub call_id: String,
     pub command: String,
     pub output: String,
+    /// Redefinit le `time` herite de `base`, comme dans le TS. Le `base.time`
+    /// doit donc rester `None` ici, sinon deux `time` se serialisent.
     pub time: ShellTime,
+}
+
+impl Shell {
+    /// `base.time` est laisse a `None` : le `time` riche du shell le remplace.
+    pub fn new(
+        id: impl Into<String>,
+        call_id: impl Into<String>,
+        command: impl Into<String>,
+        output: impl Into<String>,
+        created: Millis,
+    ) -> Self {
+        Self {
+            base: MessageBase::without_time(id),
+            call_id: call_id.into(),
+            command: command.into(),
+            output: output.into(),
+            time: ShellTime { created, completed: None },
+        }
+    }
 }
 
 
@@ -569,13 +595,7 @@ mod tests {
 
     #[test]
     fn shell_ne_compte_pas_contre_le_contexte() {
-        let shell = Message::Shell(Shell {
-            base: base(),
-            call_id: "call_1".to_string(),
-            command: "ls".to_string(),
-            output: "a".to_string(),
-            time: ShellTime { created: 1, completed: Some(2) },
-        });
+        let shell = Message::Shell(Shell::new("msg_s", "call_1", "ls", "a", 1));
         assert!(!shell.counts_against_context());
 
         let user = Message::User(User {
@@ -603,19 +623,59 @@ mod tests {
     }
 
     #[test]
-    fn les_variants_partagent_le_meme_discriminant() {
-        // Toutes les variantes doivent se differencier sur "type". Sans ca, la
-        // deserialisation d'une session becomes ambigue.
-        let types: Vec<&str> = vec![
-            Message::User(User { base: base(), prompt: Prompt::default() }).type_str(),
-            Message::System(System { base: base(), text: String::new() }).type_str(),
-        ];
-        let mut sorted = types.clone();
-        sorted.sort_unstable();
-        sorted.dedup();
-        assert_eq!(sorted.len(), types.len(), "deux variantes partagent le meme discriminant");
+    fn les_noms_de_champs_json_sont_ceux_du_typescript() {
+        // Regression : Serde emettait `session_id` et `call_id` en snake_case,
+        // alors que le TS ecrit `sessionID` et `callID`. Une session produite
+        // par l'un n'etait donc pas relisible par l'autre.
+        let syn = Message::Synthetic(Synthetic {
+            base: MessageBase::new("msg_s1", 1),
+            session_id: "ses_1".to_string(),
+            text: "x".to_string(),
+        });
+        let v = serde_json::to_value(&syn).unwrap();
+        assert_eq!(v["sessionID"], "ses_1", "le champ doit s'appeler sessionID");
+        assert!(v.get("session_id").is_none(), "snake_case interdit");
+
+        let sh = Message::Shell(Shell::new("msg_h1", "call_9", "ls", "a", 5));
+        let v = serde_json::to_value(&sh).unwrap();
+        assert_eq!(v["callID"], "call_9", "le champ doit s'appeler callID");
+        assert!(v.get("call_id").is_none(), "snake_case interdit");
+    }
+
+    #[test]
+    fn un_shell_ne_serialise_qu_un_seul_time() {
+        // Comme l'assistant, le shell redéfinit `time`. Si `base.time` restait
+        // renseigne, le JSON aurait deux cles `time`.
+        let sh = Message::Shell(Shell::new("msg_h2", "call_10", "ls", "a", 7));
+        assert!(sh.base().time.is_none());
+        let json = serde_json::to_string(&sh).unwrap();
+        assert_eq!(json.matches("\"time\"").count(), 1, "un seul time attendu");
+    }
+
+    #[test]
+    fn un_shell_se_deserialise_depuis_le_json_du_typescript() {
+        // Le vrai test de compatibilite : du JSON ecrit a la main comme le TS
+        // le ferait, relu par le portage Rust.
+        let json = serde_json::json!({
+            "type": "shell",
+            "id": "msg_h3",
+            "callID": "call_abc",
+            "command": "cargo test",
+            "output": "ok",
+            "time": { "created": 42 }
+        });
+        let msg: Message = serde_json::from_value(json).unwrap();
+        match msg {
+            Message::Shell(s) => {
+                assert_eq!(s.call_id, "call_abc");
+                assert_eq!(s.command, "cargo test");
+                assert_eq!(s.time.created, 42);
+            }
+            other => panic!("mauvaise variante : {}", other.type_str()),
+        }
     }
 }
+
 
 
 

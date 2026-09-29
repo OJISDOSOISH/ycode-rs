@@ -58,6 +58,12 @@ impl<'a> Run<'a> {
         }
     }
 
+    /// Nombre de tours effectues. Utile pour le diagnostic : un agent qui
+    /// plafonne a 100 tours a un probleme, pas une tache difficile.
+    pub fn turns(&self) -> usize {
+        self.turns
+    }
+
     /// Ajoute un message a l'historique et lui attribue le rang suivant.
     pub fn push(&mut self, message: crate::schema::session_message::Message) -> i64 {
         let seq = self.next_seq;
