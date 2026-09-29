@@ -1,4 +1,4 @@
-//! Portage Rust du coordinateur d'execution de `opencode/packages/core/src/session/run-coordinator.ts`.
+﻿//! Portage Rust du coordinateur d'execution de `opencode/packages/core/src/session/run-coordinator.ts`.
 //!
 //! Ce module fournit un coordinateur qui serialise l'execution pour chaque cle
 //! tout en permettant a differentes cles de s'executer concurremment.
@@ -10,7 +10,7 @@
 //! - `active()` retourne l'ensemble des cles avec une execution en cours.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 
 /// Erreur renvoyee quand l'execution est interrompue.
@@ -60,6 +60,20 @@ impl<E> Entry<E> {
         self.result.lock().unwrap().take().unwrap()
     }
 
+    /// Copie l'entree pour la reinserer sous une nouvelle execution.
+    ///
+    /// Les canaux de synchronisation sont partages, pas dupliques : le
+    /// successeur doit notifier les memes attentes que l'entree qu il remplace.
+    fn clone_entry(&self) -> Entry<E> {
+        Entry {
+            done: self.done.clone(),
+            result: self.result.clone(),
+            owner: None,
+            pending_wake: false,
+            stopping: false,
+        }
+    }
+
     /// Signale la fin de l'execution avec le resultat donne.
     fn complete(&self, result: Result<(), E>) {
         *self.result.lock().unwrap() = Some(result);
@@ -76,7 +90,7 @@ impl<E> Entry<E> {
 /// (plusieurs wakes sont coalesces en un seul suivi).
 pub struct Coordinator<Key, E, F> {
     active: Arc<Mutex<HashMap<Key, Entry<E>>>>,
-    drain: F,
+    drain: Arc<F>,
 }
 
 impl<Key, E, F> Coordinator<Key, E, F>
@@ -92,7 +106,7 @@ where
     pub fn new(drain: F) -> Self {
         Self {
             active: Arc::new(Mutex::new(HashMap::new())),
-            drain,
+            drain: Arc::new(drain),
         }
     }
 
@@ -147,8 +161,8 @@ where
             };
 
             // Executer drain(key, true) dans un thread separe.
-            let drain = &self.drain;
-            let key_clone = key.clone();
+            let drain = self.drain.clone();
+            let key_ref = key.clone();
             let entry_for_thread = Entry {
                 done: entry.done.clone(),
                 result: entry.result.clone(),
@@ -159,44 +173,41 @@ where
             let active_clone = self.active.clone();
 
             let handle = thread::spawn(move || {
-                let result = drain(key_clone, true);
+                let result = drain(key_ref.clone(), true);
                 // Mettre a jour l'entree apres execution.
                 let mut active = active_clone.lock().unwrap();
-                if let Some(stored_entry) = active.get_mut(&key_clone) {
+                if let Some(stored_entry) = active.get_mut(&key_ref) {
                     stored_entry.owner = None;
                     // Verifier si un wake etait en attente et qu'on ne s'arrete pas.
                     if result.is_ok() && !stored_entry.stopping && stored_entry.pending_wake {
                         stored_entry.pending_wake = false;
                         drop(active);
-                        // Demarrer un successeur.
-                        Self::start_successor(&active_clone, &drain, key_clone, false);
+                        Self::start_successor(&active_clone, &drain, key_ref.clone(), false);
                         entry_for_thread.complete(Ok(()));
                         return;
                     }
                 }
-                // Nettoyer ou preparer un successeur.
-                let mut active = active_clone.lock().unwrap();
-                if let Some(stored_entry) = active.get_mut(&key_clone) {
-                    let successor = if stored_entry.pending_wake {
-                        stored_entry.pending_wake = false;
-                        Some(Entry::new())
-                    } else {
-                        None
-                    };
-
-                    if let Some(succ) = successor {
-                        active.insert(key_clone.clone(), Entry {
-                            done: succ.done.clone(),
-                            result: succ.result.clone(),
-                            owner: None,
-                            pending_wake: false,
-                            stopping: false,
-                        });
-                        drop(active);
-                        Self::start_successor(&active_clone, &drain, key_clone, true);
-                    } else {
-                        active.remove(&key_clone);
+                // Nettoyer ou preparer un successeur, sous une seule
+                // acquisition du verrou.
+                let successor = {
+                    let mut active = active_clone.lock().unwrap();
+                    match active.get_mut(&key_ref) {
+                        Some(stored) if stored.pending_wake => {
+                            stored.pending_wake = false;
+                            Some(Entry::new())
+                        }
+                        Some(_) => {
+                            active.remove(&key_ref);
+                            None
+                        }
+                        None => None,
                     }
+                };
+
+                if let Some(succ) = successor {
+                    let stored = succ.clone_entry();
+                    active_clone.lock().unwrap().insert(key_ref.clone(), stored);
+                    Self::start_successor(&active_clone, &drain, key_ref, true);
                 }
                 entry_for_thread.complete(result);
             });
@@ -236,8 +247,8 @@ where
         });
         drop(active);
 
-        let drain = &self.drain;
-        let key_clone = key.clone();
+        let drain = self.drain.clone();
+        let key_ref = key.clone();
         let entry_for_thread = Entry {
             done: entry.done.clone(),
             result: entry.result.clone(),
@@ -248,20 +259,20 @@ where
         let active_clone = self.active.clone();
 
         thread::spawn(move || {
-            let result = drain(key_clone, false);
+            let result = drain(key_ref.clone(), false);
             let mut active = active_clone.lock().unwrap();
-            if let Some(stored_entry) = active.get_mut(&key_clone) {
+            if let Some(stored_entry) = active.get_mut(&key_ref) {
                 stored_entry.owner = None;
                 if result.is_ok() && !stored_entry.stopping && stored_entry.pending_wake {
                     stored_entry.pending_wake = false;
                     drop(active);
-                    Self::start_successor(&active_clone, &drain, key_clone, false);
+                    Self::start_successor(&active_clone, &drain, key_ref.clone(), false);
                     entry_for_thread.complete(Ok(()));
                     return;
                 }
             }
             let mut active = active_clone.lock().unwrap();
-            if let Some(stored_entry) = active.get_mut(&key_clone) {
+            if let Some(stored_entry) = active.get_mut(&key_ref) {
                 let successor = if stored_entry.pending_wake {
                     stored_entry.pending_wake = false;
                     Some(Entry::new())
@@ -270,7 +281,7 @@ where
                 };
 
                 if let Some(succ) = successor {
-                    active.insert(key_clone.clone(), Entry {
+                    active.insert(key_ref.clone(), Entry {
                         done: succ.done.clone(),
                         result: succ.result.clone(),
                         owner: None,
@@ -278,9 +289,9 @@ where
                         stopping: false,
                     });
                     drop(active);
-                    Self::start_successor(&active_clone, &drain, key_clone, true);
+                    Self::start_successor(&active_clone, &drain, key_ref.clone(), true);
                 } else {
-                    active.remove(&key_clone);
+                    active.remove(&key_ref);
                 }
             }
             entry_for_thread.complete(result);
@@ -306,28 +317,28 @@ where
     /// Demarre un thread successeur pour la cle donnee.
     fn start_successor(
         active: &Arc<Mutex<HashMap<Key, Entry<E>>>>,
-        drain: &F,
+        drain: &Arc<F>,
         key: Key,
-        is_successor: bool,
+        _is_successor: bool,
     ) {
-        let drain = drain;
-        let key_clone = key.clone();
+        let drain = drain.clone();
+        let key_ref = key.clone();
         let active_clone = active.clone();
 
         thread::spawn(move || {
-            let result = drain(key_clone, false);
+            let result = drain(key_ref.clone(), false);
             let mut active = active_clone.lock().unwrap();
-            if let Some(stored_entry) = active.get_mut(&key_clone) {
+            if let Some(stored_entry) = active.get_mut(&key_ref) {
                 stored_entry.owner = None;
                 if result.is_ok() && !stored_entry.stopping && stored_entry.pending_wake {
                     stored_entry.pending_wake = false;
                     drop(active);
-                    Self::start_successor(&active_clone, drain, key_clone, false);
+                    Self::start_successor(&active_clone, &drain, key_ref.clone(), false);
                     return;
                 }
             }
             let mut active = active_clone.lock().unwrap();
-            if let Some(stored_entry) = active.get_mut(&key_clone) {
+            if let Some(stored_entry) = active.get_mut(&key_ref) {
                 let successor = if stored_entry.pending_wake {
                     stored_entry.pending_wake = false;
                     Some(Entry::new())
@@ -336,7 +347,7 @@ where
                 };
 
                 if let Some(succ) = successor {
-                    active.insert(key_clone.clone(), Entry {
+                    active.insert(key_ref.clone(), Entry {
                         done: succ.done.clone(),
                         result: succ.result.clone(),
                         owner: None,
@@ -344,9 +355,9 @@ where
                         stopping: false,
                     });
                     drop(active);
-                    Self::start_successor(&active_clone, drain, key_clone, true);
+                    Self::start_successor(&active_clone, &drain, key_ref.clone(), true);
                 } else {
-                    active.remove(&key_clone);
+                    active.remove(&key_ref);
                 }
             }
         });
@@ -361,17 +372,19 @@ mod tests {
     use std::thread;
     use std::time::Duration;
 
+    type TestError = Box<dyn std::error::Error + Send + Sync>;
+
     #[test]
     fn execution_simple_sans_concurrence() {
         let counter = Arc::new(AtomicUsize::new(0));
         let counter_clone = counter.clone();
 
-        let coord = Coordinator::new(move |_key: u32, _force: bool| {
+        let coord = Coordinator::new(move |_key: u32, _force: bool| -> Result<(), TestError> {
             counter_clone.fetch_add(1, Ordering::SeqCst);
             Ok(())
         });
 
-        let result = coord.run(1);
+        let result: Result<(), TestError> = coord.run(1);
         assert!(result.is_ok());
         assert_eq!(counter.load(Ordering::SeqCst), 1);
     }
@@ -385,7 +398,7 @@ mod tests {
         let done_barrier = Arc::new((Mutex::new(0), Condvar::new()));
         let done_barrier_clone = done_barrier.clone();
 
-        let coord = Coordinator::new(move |_key: u32, _force: bool| {
+        let coord = Coordinator::new(move |_key: u32, _force: bool| -> Result<(), TestError> {
             // Signaler qu'on a commence.
             {
                 let (lock, cvar) = &*start_barrier_clone;
@@ -405,10 +418,7 @@ mod tests {
             Ok(())
         });
 
-        let coord_clone = Coordinator::new(coord.drain);
-        let active_clone = coord.active.clone();
-
-        // Premier run dans un thread.
+        let coord_clone = Coordinator::new((*coord.drain).clone());
         let handle = thread::spawn(move || {
             coord.run(1).unwrap();
         });
@@ -423,7 +433,7 @@ mod tests {
         }
 
         // Deuxieme run pour la meme cle - doit attendre.
-        let result = coord_clone.run(1);
+        let result: Result<(), TestError> = coord_clone.run(1);
         assert!(result.is_ok());
 
         // Liberer le premier run.
@@ -445,7 +455,7 @@ mod tests {
         let wake_count = Arc::new(AtomicUsize::new(0));
         let wake_count_clone = wake_count.clone();
 
-        let coord = Coordinator::new(move |_key: u32, force: bool| {
+        let coord = Coordinator::new(move |_key: u32, force: bool| -> Result<(), TestError> {
             if !force {
                 wake_count_clone.fetch_add(1, Ordering::SeqCst);
             }
@@ -481,7 +491,7 @@ mod tests {
         let continue_barrier = Arc::new((Mutex::new(false), Condvar::new()));
         let continue_barrier_clone = continue_barrier.clone();
 
-        let coord = Coordinator::new(move |_key: u32, force: bool| {
+        let coord = Coordinator::new(move |_key: u32, force: bool| -> Result<(), TestError> {
             if force {
                 // Premiere execution : signaler le demarrage et attendre.
                 {
@@ -502,7 +512,7 @@ mod tests {
         });
 
         // Demarrer l'execution dans un thread.
-        let coord_clone = Coordinator::new(coord.drain);
+        let coord_clone = Coordinator::new((*coord.drain).clone());
         let handle = thread::spawn(move || {
             coord.run(1).unwrap();
         });
@@ -543,7 +553,7 @@ mod tests {
         let start_barrier = Arc::new((Mutex::new(false), Condvar::new()));
         let start_barrier_clone = start_barrier.clone();
 
-        let coord = Coordinator::new(move |_key: u32, _force: bool| {
+        let coord = Coordinator::new(move |_key: u32, _force: bool| -> Result<(), TestError> {
             // Signaler le demarrage.
             {
                 let (lock, cvar) = &*start_barrier_clone;
@@ -558,7 +568,7 @@ mod tests {
 
         // Demarrer l'execution.
         let handle = thread::spawn({
-            let coord = Coordinator::new(coord.drain);
+            let coord = Coordinator::new((*coord.drain).clone());
             move || coord.run(1)
         });
 
@@ -572,14 +582,10 @@ mod tests {
         }
 
         // Interrompre.
-        Coordinator::new(coord.drain).interrupt(1);
+        Coordinator::new((*coord.drain).clone()).interrupt(1);
 
         // L'interruption doit retourner rapidement.
-        let result = handle.join().unwrap();
-        // L'execution a ete interrompue, donc Err(Interrupted) ou similar.
-        // Dans notre implementation, l'interruption attend la fin du thread,
-        // mais le thread continue. Le resultat depend de l'implementation.
-        // Ici on verifie juste que l'interruption ne bloque pas indifferement.
+        let _ = handle.join().unwrap();
         thread::sleep(Duration::from_millis(50));
         // Le compteur ne doit pas avoir ete incremente (travail pas termine).
         assert_eq!(counter.load(Ordering::SeqCst), 0);
@@ -592,7 +598,7 @@ mod tests {
         let barrier = Arc::new((Mutex::new(0), Condvar::new()));
         let barrier_clone = barrier.clone();
 
-        let coord = Coordinator::new(move |_key: u32, _force: bool| {
+        let coord = Coordinator::new(move |_key: u32, _force: bool| -> Result<(), TestError> {
             let (lock, cvar) = &*barrier_clone;
             let mut count = lock.lock().unwrap();
             *count += 1;
@@ -607,7 +613,7 @@ mod tests {
             Ok(())
         });
 
-        let coord_clone = Coordinator::new(coord.drain);
+        let coord_clone = Coordinator::new((*coord.drain).clone());
 
         // Lancer deux executions pour des cles differentes en parallele.
         let handle1 = thread::spawn(move || coord.run(1).unwrap());
@@ -622,7 +628,7 @@ mod tests {
 
     #[test]
     fn active_retourne_cles_actives() {
-        let coord = Coordinator::new(|_key: u32, _force: bool| {
+        let coord = Coordinator::new(|_key: u32, _force: bool| -> Result<(), TestError> {
             thread::sleep(Duration::from_millis(50));
             Ok(())
         });
@@ -630,7 +636,7 @@ mod tests {
         assert!(coord.active().is_empty());
 
         let handle = thread::spawn({
-            let coord = Coordinator::new(coord.drain);
+            let coord = Coordinator::new((*coord.drain).clone());
             move || coord.run(1).unwrap()
         });
 
@@ -648,11 +654,11 @@ mod tests {
         let counter = Arc::new(AtomicUsize::new(0));
         let counter_clone = counter.clone();
 
-        let coord = Coordinator::new(move |key: u32, force: bool| {
+        let coord = Coordinator::new(move |_key: u32, force: bool| -> Result<(), TestError> {
             counter_clone.fetch_add(1, Ordering::SeqCst);
             // Verifier que le wake (force=false) arrive avant le run (force=true)
             // dans le cas d'un wake sur cle inactive.
-            assert!(!force, "wake doit etre force=false pour la cle {key}");
+            assert!(!force, "wake doit etre force=false");
             Ok(())
         });
 
@@ -661,10 +667,11 @@ mod tests {
         thread::sleep(Duration::from_millis(50));
 
         // Run sur la meme cle -> doit attendre l'execution du wake.
-        let result = coord.run(42);
+        let result: Result<(), TestError> = coord.run(42);
         assert!(result.is_ok());
 
         // Deux executions : wake + run (qui a attend le wake).
         assert_eq!(counter.load(Ordering::SeqCst), 2);
     }
 }
+

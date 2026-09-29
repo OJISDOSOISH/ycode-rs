@@ -11,4 +11,5 @@ pub mod model_route;
 pub mod revert;
 pub mod run_coordinator;
 pub mod todo;
+pub mod to_llm_message;
 pub mod turn;
