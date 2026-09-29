@@ -9,4 +9,5 @@ pub mod schema;
 
 pub mod llm;
 pub mod permission;
+pub mod question;
 pub mod tool;

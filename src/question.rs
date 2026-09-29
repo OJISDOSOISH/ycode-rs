@@ -1,290 +1,199 @@
-//! Portage Rust de `opencode/packages/core/src/question.ts`.
+//! Portage Rust de `opencode/packages/schema/src/question.ts` et de
+//! `opencode/packages/core/src/question.ts`.
 //!
-//! Gestion des questions interactives : creation, reponses, rejets et liste
-//! des requetes en attente. Le service maintient une table de requetes
-//! associees a des canaux oneshot pour la resolution asynchrone.
+//! Le mecanisme des questions est ce qui permet a un agent de s arreter et de
+//! demander une precision plutot que de deviner. C est une barriere anti-
+//! hallucination : sans elle, l agent invente une specification.
+//!
+//! Point de conception a ne pas confondre : une **reponse est une liste de
+//! choix**, pas un chaine. L'original declare
+//! `Answer = Schema.Array(Schema.String)`, et `Reply.answers` est un tableau de
+//! ces listes. Donc pour deux questions, la reponse est
+//! `[["oui"], ["non", "peut-etre"]]` : une liste par question, dans l ordre.
+//!
+//! Confondre les deux est facile et produit un agent qui decale ses reponses
+//! d une question a l autre. Les tests verrouillent la structure.
 
-use std::collections::HashMap;
-use std::sync::Arc;
-
-use anyhow::Result;
-use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{Mutex, oneshot};
 
-/// Identifiant de question, prefixe par "que_".
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct QuestionId(pub String);
+/// Prefixe des identifiants de question.
+pub const QUESTION_ID_PREFIX: &str = "que_";
 
-impl QuestionId {
-    /// Genere un nouvel identifiant croissant.
-    pub fn create() -> Self {
-        Self(format!("que_{}", uuid::Uuid::now_v7().as_u128()))
-    }
-
-    /// Cree un identifiant a partir d'une chaine existante.
-    pub fn from_string(id: String) -> Self {
-        Self(id)
-    }
+pub fn is_valid_question_id(id: &str) -> bool {
+    id.starts_with(QUESTION_ID_PREFIX)
 }
 
-/// Option de reponse pour une question.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Option {
-    #[serde(rename = "label")]
+/// Un choix propose a l'utilisateur.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Option_ {
+    /// Texte affiche, 1 a 5 mots.
     pub label: String,
-
-    #[serde(rename = "description")]
+    /// Explication du choix.
     pub description: String,
 }
 
-/// Informations completement decrites pour poser une question.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+impl Option_ {
+    pub fn new(label: impl Into<String>, description: impl Into<String>) -> Self {
+        Self { label: label.into(), description: description.into() }
+    }
+}
+
+/// Question posee a l'utilisateur.
+///
+/// `custom` autorise a taper une reponse libre. Le defaut du TS est `true` :
+/// si le champ est absent, l'utilisateur peut repondre librement. On encode ce
+/// defaut explicitement plutot que de laisser `None` ambiguous.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Info {
-    #[serde(rename = "question")]
+    /// Question complete.
     pub question: String,
-
-    #[serde(rename = "header")]
+    /// Etiquette tres courte, 30 caracteres maximum.
     pub header: String,
-
-    #[serde(rename = "options")]
-    pub options: Vec<Option>,
-
-    #[serde(rename = "multiple", skip_serializing_if = "Option::is_none")]
+    /// Choix disponibles.
+    pub options: Vec<Option_>,
+    /// Autorise a selectionner plusieurs choix.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub multiple: Option<bool>,
-
-    #[serde(rename = "custom", skip_serializing_if = "Option::is_none")]
+    /// Autorise a taper une reponse libre. Defaut `true` dans le TS.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub custom: Option<bool>,
 }
 
-/// Prompt minimal pour une question (sans champs optionnels).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Prompt {
-    #[serde(rename = "question")]
-    pub question: String,
+impl Info {
+    pub fn new(question: impl Into<String>, header: impl Into<String>, options: Vec<Option_>) -> Self {
+        Self { question: question.into(), header: header.into(), options, multiple: None, custom: None }
+    }
 
-    #[serde(rename = "header")]
-    pub header: String,
+    /// L'utilisateur peut-il repondre librement ?
+    ///
+    /// Renvoie `true` quand `custom` est absent, comme le fait le TS.
+    pub fn allows_custom(&self) -> bool {
+        self.custom.unwrap_or(true)
+    }
 
-    #[serde(rename = "options")]
-    pub options: Vec<Option>,
-
-    #[serde(rename = "multiple", skip_serializing_if = "Option::is_none")]
-    pub multiple: Option<bool>,
+    /// Une reponse libre est-elle possible pour cette question ?
+    pub fn allows_custom_answer(&self) -> bool {
+        self.allows_custom()
+    }
 }
 
-/// Reference a un appel d'outil ayant declenche la question.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// Question sans la mention de reponse libre.
+///
+/// Le TS distingue `Prompt` (base, sans `custom`) de `Info` (avec `custom`).
+/// On conserve la distinction plutot que de fusionner, pour rester fidele.
+pub type Prompt = Info;
+
+/// Origine de la question : elle vient d'un appel d'outil.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Tool {
     #[serde(rename = "messageID")]
     pub message_id: String,
-
     #[serde(rename = "callID")]
     pub call_id: String,
 }
 
-/// Requete de question complete avec identifiant et session.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// Demande de question en attente de reponse.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Request {
-    #[serde(rename = "id")]
-    pub id: QuestionId,
-
+    pub id: String,
     #[serde(rename = "sessionID")]
     pub session_id: String,
-
-    #[serde(rename = "questions")]
     pub questions: Vec<Info>,
-
-    #[serde(rename = "tool", skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tool: Option<Tool>,
 }
 
-/// Reponse utilisateur : tableau de labels selectionnes par question.
+/// Reponse a **une** question : la liste des libelles choisis.
+///
+/// C'est un tableau, pas une chaine. Voir la note de module.
 pub type Answer = Vec<String>;
 
-/// Conteneur de reponses pour une requete.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// Reponse a une demande : une `Answer` par question, dans l'ordre des
+/// questions posees.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Reply {
-    #[serde(rename = "answers")]
     pub answers: Vec<Answer>,
 }
 
-/// Evenements emis par le service de questions.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum Event {
-    #[serde(rename = "question.v2.asked")]
-    Asked { request: Request },
+impl Reply {
+    /// Verifie que la reponse couvre bien toutes les questions.
+    ///
+    /// Le TS ne verifie pas : il fait confiance a l'appelant. Une reponse trop
+    /// courte produirait un decalage silencieux, chaque question recevant la
+    /// reponse de la precedente. On ajoute donc la verification, parce
+    /// qu'un agent qui recoit une reponse decalee ne peut pas s'en apercevoir.
+    pub fn is_complete(&self, questions: &[Info]) -> bool {
+        self.answers.len() == questions.len()
+    }
 
-    #[serde(rename = "question.v2.replied")]
-    Replied {
-        #[serde(rename = "sessionID")]
-        session_id: String,
-        #[serde(rename = "requestID")]
-        request_id: QuestionId,
-        answers: Vec<Answer>,
-    },
-
-    #[serde(rename = "question.v2.rejected")]
-    Rejected {
-        #[serde(rename = "sessionID")]
-        session_id: String,
-        #[serde(rename = "requestID")]
-        request_id: QuestionId,
-    },
+    /// Reponse a la question d'index donne.
+    pub fn answer_for(&self, index: usize) -> Option<&Answer> {
+        self.answers.get(index)
+    }
 }
 
-/// Erreur : l'utilisateur a rejete la question.
-#[derive(Debug, Clone, thiserror::Error)]
-#[error("L'utilisateur a rejete cette question")]
-pub struct RejectedError;
-
-/// Erreur : requete introuvable.
-#[derive(Debug, Clone, thiserror::Error)]
-#[error("Requete introuvable : {request_id}")]
-pub struct NotFoundError {
-    #[serde(rename = "requestID")]
-    pub request_id: QuestionId,
+/// Erreurs du mecanisme de question.
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum QuestionError {
+    /// L'utilisateur a ferme la boite de dialogue sans repondre.
+    #[error("l'utilisateur a rejete cette question")]
+    Rejected,
+    /// Demande inconnue.
+    #[error("demande de question introuvable : {request_id}")]
+    NotFound { request_id: String },
 }
 
-/// Entree pour poser une nouvelle question.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AskInput {
-    #[serde(rename = "sessionID")]
-    pub session_id: String,
-
-    #[serde(rename = "questions")]
-    pub questions: Vec<Info>,
-
-    #[serde(rename = "tool", skip_serializing_if = "Option::is_none")]
-    pub tool: Option<Tool>,
+/// Regroupe les demandes en attente.
+#[derive(Debug, Default)]
+pub struct Pending {
+    items: Vec<Request>,
 }
 
-/// Entree pour repondre a une question.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReplyInput {
-    #[serde(rename = "requestID")]
-    pub request_id: QuestionId,
+impl Pending {
+    pub fn new() -> Self {
+        Self::default()
+    }
 
-    #[serde(rename = "answers")]
-    pub answers: Vec<Answer>,
-}
-
-/// Interface du service de questions.
-#[async_trait]
-pub trait QuestionService: Send + Sync {
-    /// Pose une question et attend la reponse.
-    async fn ask(&self, input: AskInput) -> Result<Vec<Answer>, RejectedError>;
-
-    /// Repond a une question en attente.
-    async fn reply(&self, input: ReplyInput) -> Result<(), NotFoundError>;
-
-    /// Rejete une question en attente.
-    async fn reject(&self, request_id: QuestionId) -> Result<(), NotFoundError>;
-
-    /// Liste toutes les requetes en attente.
-    async fn list(&self) -> Vec<Request>;
-}
-
-/// Requete en attente avec son canal de reponse.
-struct Pending {
-    request: Request,
-    sender: oneshot::Sender<Result<Vec<Answer>, RejectedError>>,
-}
-
-/// Implementation concrete du service de questions.
-pub struct QuestionServiceImpl {
-    pending: Arc<Mutex<HashMap<QuestionId, Pending>>>,
-    event_sender: tokio::sync::broadcast::Sender<Event>,
-}
-
-impl QuestionServiceImpl {
-    /// Cree un nouveau service avec un canal d'evenements.
-    pub fn new(event_sender: tokio::sync::broadcast::Sender<Event>) -> Self {
-        Self {
-            pending: Arc::new(Mutex::new(HashMap::new())),
-            event_sender,
+    pub fn push(&mut self, request: Request) -> bool {
+        // Un identifiant en double est refuse, comme le `EffectRuntime.die`
+        // du TS : c'est un bug de programmation, pas une condition d'usage.
+        if self.items.iter().any(|r| r.id == request.id) {
+            return false;
         }
+        self.items.push(request);
+        true
     }
 
-    /// Envoie un evenement si des abonnes existent.
-    async fn publish(&self, event: Event) {
-        let _ = self.event_sender.send(event);
-    }
-}
-
-#[async_trait]
-impl QuestionService for QuestionServiceImpl {
-    async fn ask(&self, input: AskInput) -> Result<Vec<Answer>, RejectedError> {
-        let id = QuestionId::create();
-        let (tx, rx) = oneshot::channel();
-
-        let request = Request {
-            id: id.clone(),
-            session_id: input.session_id.clone(),
-            questions: input.questions,
-            tool: input.tool,
-        };
-
-        {
-            let mut pending = self.pending.lock().await;
-            pending.insert(id.clone(), Pending { request: request.clone(), sender: tx });
-        }
-
-        self.publish(Event::Asked { request }).await;
-
-        // Attend la reponse ou le rejet.
-        match rx.await {
-            Ok(result) => result,
-            Err(_) => Err(RejectedError),
-        }
+    pub fn get(&self, id: &str) -> Option<&Request> {
+        self.items.iter().find(|r| r.id == id)
     }
 
-    async fn reply(&self, input: ReplyInput) -> Result<(), NotFoundError> {
-        let pending = {
-            let mut pending = self.pending.lock().await;
-            pending.remove(&input.request_id)
-        };
-
-        let Some(pending_item) = pending else {
-            return Err(NotFoundError { request_id: input.request_id });
-        };
-
-        self.publish(Event::Replied {
-            session_id: pending_item.request.session_id.clone(),
-            request_id: pending_item.request.id.clone(),
-            answers: input.answers.clone(),
-        })
-        .await;
-
-        let _ = pending_item.sender.send(Ok(input.answers));
-        Ok(())
+    pub fn remove(&mut self, id: &str) -> Option<Request> {
+        let index = self.items.iter().position(|r| r.id == id)?;
+        Some(self.items.remove(index))
     }
 
-    async fn reject(&self, request_id: QuestionId) -> Result<(), NotFoundError> {
-        let pending = {
-            let mut pending = self.pending.lock().await;
-            pending.remove(&request_id)
-        };
-
-        let Some(pending_item) = pending else {
-            return Err(NotFoundError { request_id });
-        };
-
-        self.publish(Event::Rejected {
-            session_id: pending_item.request.session_id.clone(),
-            request_id: pending_item.request.id.clone(),
-        })
-        .await;
-
-        let _ = pending_item.sender.send(Err(RejectedError));
-        Ok(())
+    pub fn for_session(&self, session_id: &str) -> Vec<Request> {
+        self.items.iter().filter(|r| r.session_id == session_id).cloned().collect()
     }
 
-    async fn list(&self) -> Vec<Request> {
-        let pending = self.pending.lock().await;
-        pending.values().map(|p| p.request.clone()).collect()
+    pub fn list(&self) -> &[Request] {
+        &self.items
+    }
+
+    /// Rejette toutes les demandes d'une session.
+    ///
+    /// Appele quand l'utilisateur refuse une question : les autres questions de
+    /// la meme session n'ont plus de sens, elles portaient sur le meme contexte
+    /// bloque. Les questions d'autres sessions sont laissees intactes.
+    pub fn reject_session(&mut self, session_id: &str) -> usize {
+        let before = self.items.len();
+        self.items.retain(|r| r.session_id != session_id);
+        before - self.items.len()
+    }
+
+    pub fn clear(&mut self) {
+        self.items.clear();
     }
 }
 
@@ -292,169 +201,110 @@ impl QuestionService for QuestionServiceImpl {
 mod tests {
     use super::*;
 
-    fn make_info() -> Info {
-        Info {
-            question: "Choisissez une option".to_string(),
-            header: "Options".to_string(),
-            options: vec![
-                Option { label: "A".to_string(), description: "Premier choix".to_string() },
-                Option { label: "B".to_string(), description: "Second choix".to_string() },
-            ],
-            multiple: Some(false),
-            custom: Some(true),
-        }
+    fn question(q: &str) -> Info {
+        Info::new(q, "H", vec![Option_::new("oui", "yes"), Option_::new("non", "no")])
     }
 
-    fn make_ask_input() -> AskInput {
-        AskInput {
-            session_id: "ses_test".to_string(),
-            questions: vec![make_info()],
+    fn request(id: &str, n: usize) -> Request {
+        Request {
+            id: id.to_string(),
+            session_id: "ses_1".to_string(),
+            questions: (0..n).map(|i| question(&format!("q{i}"))).collect(),
             tool: None,
         }
     }
 
-    #[tokio::test]
-    async fn liste_vide_au_demarrage() {
-        let (tx, _) = tokio::sync::broadcast::channel(16);
-        let service = QuestionServiceImpl::new(tx);
-        let list = service.list().await;
-        assert!(list.is_empty(), "La liste doit etre vide au demarrage");
-    }
-
-    #[tokio::test]
-    async fn une_seule_question_ajoutee_est_listee() {
-        let (tx, _) = tokio::sync::broadcast::channel(16);
-        let service = QuestionServiceImpl::new(tx.clone());
-
-        let input = make_ask_input();
-        let service_clone = service.clone();
-        tokio::spawn(async move {
-            // Repond immediatement pour debloquer ask
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            let requests = service_clone.list().await;
-            if let Some(req) = requests.first() {
-                let _ = service_clone.reply(ReplyInput {
-                    request_id: req.id.clone(),
-                    answers: vec![vec!["A".to_string()]],
-                }).await;
-            }
-        });
-
-        let _ = service.ask(input).await;
-        let list = service.list().await;
-        assert!(list.is_empty(), "La liste doit etre vide apres reponse");
-    }
-
-    #[tokio::test]
-    async fn rejet_retire_la_requete_de_la_liste() {
-        let (tx, _) = tokio::sync::broadcast::channel(16);
-        let service = QuestionServiceImpl::new(tx.clone());
-
-        let input = make_ask_input();
-        let service_clone = service.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            let requests = service_clone.list().await;
-            if let Some(req) = requests.first() {
-                let _ = service_clone.reject(req.id.clone()).await;
-            }
-        });
-
-        let result = service.ask(input).await;
-        assert!(result.is_err(), "Le rejet doit retourner une erreur");
-        let list = service.list().await;
-        assert!(list.is_empty(), "La liste doit etre vide apres rejet");
-    }
-
-    #[tokio::test]
-    async fn reponses_multiples_ordre_conserve() {
-        let (tx, _) = tokio::sync::broadcast::channel(16);
-        let service = QuestionServiceImpl::new(tx.clone());
-
-        let mut input = make_ask_input();
-        input.questions = vec![
-            make_info(),
-            Info {
-                question: "Deuxieme question".to_string(),
-                header: "Q2".to_string(),
-                options: vec![Option { label: "X".to_string(), description: "Choix X".to_string() }],
-                multiple: Some(true),
-                custom: Some(false),
-            },
-        ];
-
-        let service_clone = service.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            let requests = service_clone.list().await;
-            if let Some(req) = requests.first() {
-                let _ = service_clone.reply(ReplyInput {
-                    request_id: req.id.clone(),
-                    answers: vec![vec!["A".to_string()], vec!["X".to_string()]],
-                }).await;
-            }
-        });
-
-        let answers = service.ask(input).await.unwrap();
-        assert_eq!(answers.len(), 2, "Deux reponses attendues");
-        assert_eq!(answers[0], vec!["A"]);
-        assert_eq!(answers[1], vec!["X"]);
-    }
-
-    #[tokio::test]
-    async fn reponse_a_requete_inexistante_retourne_erreur() {
-        let (tx, _) = tokio::sync::broadcast::channel(16);
-        let service = QuestionServiceImpl::new(tx);
-
-        let result = service.reply(ReplyInput {
-            request_id: QuestionId::from_string("que_inexistant".to_string()),
-            answers: vec![vec!["A".to_string()]],
-        }).await;
-
-        assert!(result.is_err(), "Reponse a ID inconnu doit echouer");
-    }
-
-    #[tokio::test]
-    async fn rejet_requete_inexistante_retourne_erreur() {
-        let (tx, _) = tokio::sync::broadcast::channel(16);
-        let service = QuestionServiceImpl::new(tx);
-
-        let result = service.reject(QuestionId::from_string("que_inexistant".to_string())).await;
-
-        assert!(result.is_err(), "Rejet d'ID inconnu doit echouer");
+    #[test]
+    fn la_reponse_est_une_liste_par_question() {
+        // La structure exacte du TS : un tableau de tableaux, dans l'ordre.
+        let r = Reply { answers: vec![vec!["oui".into()], vec!["non".into(), "peut-etre".into()]] };
+        let v = serde_json::to_value(&r).unwrap();
+        assert!(v["answers"][0].is_array());
+        assert_eq!(v["answers"][0][0], "oui");
+        assert_eq!(v["answers"][1].as_array().unwrap().len(), 2);
     }
 
     #[test]
-    fn serialisation_option_conserve_camelcase() {
-        let opt = Option { label: "Test".to_string(), description: "Desc".to_string() };
-        let json = serde_json::to_string(&opt).unwrap();
-        assert!(json.contains("\"label\""));
-        assert!(json.contains("\"description\""));
+    fn une_reponse_trop_courte_est_detectee() {
+        // Sans cette verification, la reponse de q0 partirait sur q1.
+        let questions = vec![question("q0"), question("q1")];
+        let complete = Reply { answers: vec![vec!["oui".into()], vec!["non".into()]] };
+        assert!(complete.is_complete(&questions));
+
+        let courte = Reply { answers: vec![vec!["oui".into()]] };
+        assert!(!courte.is_complete(&questions));
     }
 
     #[test]
-    fn serialisation_info_ignore_champs_none() {
-        let info = Info {
-            question: "Q".to_string(),
-            header: "H".to_string(),
-            options: vec![],
-            multiple: None,
-            custom: None,
-        };
-        let json = serde_json::to_string(&info).unwrap();
-        assert!(!json.contains("multiple"));
-        assert!(!json.contains("custom"));
+    fn l_acces_par_index_ne_decale_pas() {
+        let r = Reply { answers: vec![vec!["oui".into()], vec!["non".into()]] };
+        assert_eq!(r.answer_for(0).unwrap()[0], "oui");
+        assert_eq!(r.answer_for(1).unwrap()[0], "non");
+        assert!(r.answer_for(2).is_none());
     }
 
     #[test]
-    fn serialisation_event_tag_explicite() {
-        let event = Event::Asked { request: Request {
-            id: QuestionId::create(),
-            session_id: "ses".to_string(),
+    fn la_reponse_libre_est_autorisee_par_defaut() {
+        // Le TS dit `default: true` quand le champ est absent.
+        let q = question("q");
+        assert!(q.allows_custom_answer());
+        assert!(q.allows_custom(), "l absence du champ vaut true, comme dans le TS");
+    }
+
+    #[test]
+    fn la_reponse_libre_peut_etre_desactivee() {
+        let mut q = question("q");
+        q.custom = Some(false);
+        assert!(!q.allows_custom_answer());
+    }
+
+    #[test]
+    fn les_noms_de_champs_json_sont_en_camelcase() {
+        // Piege deja vu deux fois dans ce portage.
+        let r = Request {
+            id: "que_1".into(),
+            session_id: "ses_1".into(),
             questions: vec![],
-            tool: None,
-        }};
-        let json = serde_json::to_string(&event).unwrap();
-        assert!(json.contains("\"type\":\"question.v2.asked\""));
+            tool: Some(Tool { message_id: "msg_1".into(), call_id: "call_1".into() }),
+        };
+        let v = serde_json::to_value(&r).unwrap();
+        assert_eq!(v["sessionID"], "ses_1");
+        assert_eq!(v["tool"]["messageID"], "msg_1");
+        assert_eq!(v["tool"]["callID"], "call_1");
+        assert!(v.get("session_id").is_none());
+    }
+
+    #[test]
+    fn un_identifiant_en_double_est_refuse() {
+        let mut p = Pending::new();
+        assert!(p.push(request("que_1", 1)));
+        assert!(!p.push(request("que_1", 1)), "identifiant en double refuse");
+        assert_eq!(p.list().len(), 1);
+    }
+
+    #[test]
+    fn rejeter_une_question_rejette_celle_de_la_meme_session() {
+        let mut p = Pending::new();
+        p.push(request("que_1", 1));
+        p.push(Request { session_id: "ses_2".into(), ..request("que_2", 1) });
+
+        assert_eq!(p.reject_session("ses_1"), 1);
+        assert!(p.get("que_1").is_none());
+        assert!(p.get("que_2").is_some(), "une autre session n est pas affectee");
+    }
+
+    #[test]
+    fn les_demandes_sont_filtrees_par_session() {
+        let mut p = Pending::new();
+        p.push(request("que_1", 1));
+        p.push(Request { session_id: "ses_2".into(), ..request("que_2", 1) });
+        assert_eq!(p.for_session("ses_1").len(), 1);
+        assert_eq!(p.for_session("ses_2").len(), 1);
+    }
+
+    #[test]
+    fn le_prefixe_d_identifiant_est_verifie() {
+        assert!(is_valid_question_id("que_abc"));
+        assert!(!is_valid_question_id("msg_abc"));
     }
 }
