@@ -127,7 +127,7 @@ impl Protocol {
     ///
     /// Anthropic ne prend pas de jeton porteur : la cle va dans un en-tete
     /// dedie. Utiliser un jeton bearer chez Anthropic est une erreur silencieuse
-    /// qui se manifeste par un 401。
+    /// qui se manifeste par un 401.
     pub fn auth_style(self) -> AuthStyle {
         match self {
             Protocol::AnthropicMessages => AuthStyle::Header("x-api-key".to_string()),

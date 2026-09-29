@@ -2,7 +2,7 @@
 //!
 //! Revenir en arriere dans une session doit restaurer les fichiers ecrits apres
 //! le point de retour. Le point delicat n'est pas la restauration, mais **lequel**
-//! des snapshots d'un fichier_f 使用 le premier, et non le dernier.
+//! des snapshots d'un fichier : retenir le premier, et non le dernier.
 //!
 //! Exemple : l'agent edite `a.ts` au tour 3, puis encore au tour 7. Pour revenir
 //! au tour 2, il faut le snapshot d'avant le tour 3. Prendre le dernier snapshot

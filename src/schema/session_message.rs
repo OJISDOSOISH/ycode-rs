@@ -32,7 +32,7 @@ pub fn is_valid_msg_id(id: &str) -> bool {
 /// Horodatage en millisecondes depuis l'epoque Unix.
 ///
 /// Le TS utilise `DateTimeUtcFromMillis`. On garde les millisecondes plutot que
-/// de convertir en `SystemTime` : le stockage est en JSON, et往返 (aller-retour)
+/// de convertir en `SystemTime` : le stockage est en JSON, et l'aller-retour
 /// JSON/millisecondes doit etre sans perte.
 pub type Millis = i64;
 
