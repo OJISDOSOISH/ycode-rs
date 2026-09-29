@@ -1,0 +1,72 @@
+name: build
+
+# Compilation et tests de ycode.
+#
+# Tout se passe sur les runners GitHub : ta machine ne compile jamais rien, et
+# c'est voulu. Le binaire produit est publie en artefact, tel quel, sans
+# installation ni dependances.
+#
+# Le cache cargo est partage entre versions de la toolchain quand c'est
+# possible : sur un gros portage, recompiler toutes les dependances a chaque
+# commit coute plus cher que le code lui-meme.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  build:
+    name: build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: ycode-windows
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: ycode-linux
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: ycode-macos
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Installer Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cacher les dependances cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Verifier le format
+        run: cargo fmt --all -- --check
+        continue-on-error: true
+
+      - name: Compiler les tests
+        run: cargo test --no-run --target ${{ matrix.target }}
+
+      - name: Lancer les tests
+        run: cargo test --target ${{ matrix.target }}
+
+      - name: Compiler la version optimisee
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Publier l'artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.target == 'x86_64-pc-windows-msvc' && 'target/x86_64-pc-windows-msvc/release/ycode.exe' || format('target/{0}/release/ycode', matrix.target) }}
+          if-no-files-found: error
