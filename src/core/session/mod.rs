@@ -7,6 +7,8 @@ pub mod compaction;
 pub mod context_epoch;
 pub mod history;
 pub mod max_steps;
+pub mod model_route;
 pub mod revert;
+pub mod run_coordinator;
 pub mod todo;
 pub mod turn;
