@@ -76,16 +76,24 @@ pub struct Prompt {
 
 // ------------------------------------------------------------------ modele
 
-/// Reference de modele, de la forme `provider/model`.
+/// Reference de modele (Model.Ref du TS) : utilisee quand la session change
+/// de modele ou quand un assistant repond.
+///
+/// Forme canonique `{id, providerID, variant?}`, identique a celle de
+/// core/session/schema.rs. L'ancienne forme `{provider, model}` n'existe
+/// dans aucun fichier TS : elle est supprimee, pas migree.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelRef {
-    pub provider: String,
-    pub model: String,
+    pub id: String,
+    #[serde(rename = "providerID")]
+    pub provider_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variant: Option<String>,
 }
 
 impl ModelRef {
-    pub fn new(provider: impl Into<String>, model: impl Into<String>) -> Self {
-        Self { provider: provider.into(), model: model.into() }
+    pub fn new(id: impl Into<String>, provider_id: impl Into<String>) -> Self {
+        Self { id: id.into(), provider_id: provider_id.into(), variant: None }
     }
 }
 
@@ -555,7 +563,7 @@ mod tests {
             "id": "msg_test0002",
             "time": { "created": 100, "completed": 200 },
             "agent": "build",
-            "model": { "provider": "opencode", "model": "claude-sonnet-4-5" },
+            "model": { "id": "claude-sonnet-4-5", "providerID": "opencode" },
             "content": []
         });
 
@@ -563,7 +571,7 @@ mod tests {
         match &msg {
             Message::Assistant(a) => {
                 assert_eq!(a.agent, "build");
-                assert_eq!(a.model.model, "claude-sonnet-4-5");
+                assert_eq!(a.model.id, "claude-sonnet-4-5");
                 assert_eq!(a.time.created, 100);
                 assert_eq!(a.time.completed, Some(200));
                 // Le `time` de base est laisse vide : l'assistant porte le sien.
@@ -582,7 +590,7 @@ mod tests {
             "msg_test0003",
             10,
             "build",
-            ModelRef::new("opencode", "claude-sonnet-4-5"),
+            ModelRef::new("claude-sonnet-4-5", "opencode"),
         ));
         let v = serde_json::to_value(&msg).unwrap();
 
