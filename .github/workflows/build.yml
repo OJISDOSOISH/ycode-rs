@@ -63,23 +63,28 @@ jobs:
       # masquait tout signal. Les doctests auront leur propre job plus tard.
       - name: Test coordinator simple
         if: always()
-        run: cargo test --target ${{ matrix.target }} --lib --bins --tests -- --exact core::session::run_coordinator::tests::execution_simple_sans_concurrence
+        shell: bash
+        run: cargo test --target ${{ matrix.target }} --lib --bins --tests -- --exact core::session::run_coordinator::tests::execution_simple_sans_concurrence 2>&1 | tee -a tests.log; test ${PIPESTATUS[0]} -eq 0
 
       - name: Test coordinator wake coalesce
         if: always()
-        run: cargo test --target ${{ matrix.target }} --lib --bins --tests -- --exact core::session::run_coordinator::tests::wake_coalesce_plusieurs_wakes_en_un_seul_successeur
+        shell: bash
+        run: cargo test --target ${{ matrix.target }} --lib --bins --tests -- --exact core::session::run_coordinator::tests::wake_coalesce_plusieurs_wakes_en_un_seul_successeur 2>&1 | tee -a tests.log; test ${PIPESTATUS[0]} -eq 0
 
       - name: Test coordinator wake pendant execution
         if: always()
-        run: cargo test --target ${{ matrix.target }} --lib --bins --tests -- --exact core::session::run_coordinator::tests::wake_pendant_execution_planifie_un_successeur
+        shell: bash
+        run: cargo test --target ${{ matrix.target }} --lib --bins --tests -- --exact core::session::run_coordinator::tests::wake_pendant_execution_planifie_un_successeur 2>&1 | tee -a tests.log; test ${PIPESTATUS[0]} -eq 0
 
       - name: Test coordinator cles differentes
         if: always()
-        run: cargo test --target ${{ matrix.target }} --lib --bins --tests -- --exact core::session::run_coordinator::tests::cles_differentes_s_executent_concurremment
+        shell: bash
+        run: cargo test --target ${{ matrix.target }} --lib --bins --tests -- --exact core::session::run_coordinator::tests::cles_differentes_s_executent_concurremment 2>&1 | tee -a tests.log; test ${PIPESTATUS[0]} -eq 0
 
       - name: Lancer les autres tests
         if: always()
-        run: cargo test --target ${{ matrix.target }} --lib --bins --tests -- --skip core::session::run_coordinator
+        shell: bash
+        run: cargo test --target ${{ matrix.target }} --lib --bins --tests -- --skip core::session::run_coordinator 2>&1 | tee -a tests.log; test ${PIPESTATUS[0]} -eq 0
 
       - name: Compiler la version optimisee
         run: cargo build --release --target ${{ matrix.target }}
@@ -145,5 +150,58 @@ jobs:
               if ($items.Count -gt $couvert) {
                 Write-Output "::notice ::exfil: $($items.Count - $couvert) erreurs restantes non publiees"
               }
+            }
+          }
+
+      # Exfiltration des echecs de tests, meme mecanique que la compilation :
+      # les logs sont 403 en anonyme, donc chaque test en echec est re-emit
+      # en annotation, batche 10 par annotation (plafond GitHub: 10 par step).
+      - name: Publier echecs tests
+        if: failure()
+        run: |
+          if (Test-Path tests.log) {
+            $lignes = @(Get-Content tests.log)
+            $resultats = @($lignes | Where-Object { $_ -match '^test result:' })
+            if ($resultats.Count -eq 0) { exit 0 }
+            Write-Output "::notice ::tests: $($resultats -join ' | ')"
+
+            $echecs = @($lignes | Where-Object { $_ -match '^test .* \.\.\. FAILED' } |
+                        ForEach-Object { ($_ -replace '^test (.+) \.\.\. FAILED', '$1').Trim() } |
+                        Select-Object -Unique)
+            if ($echecs.Count -eq 0) { exit 0 }
+
+            # Bloc de sortie de chaque test en echec : 3 lignes non vides
+            # (panique, message, left/right de l'assertion).
+            $blocs = @{}
+            $cur = $null
+            foreach ($l in $lignes) {
+              if ($l -match '^---- (.+) stdout ----') {
+                $cur = $Matches[1]
+                if (-not $blocs.ContainsKey($cur)) { $blocs[$cur] = @() }
+              }
+              elseif ($l -match '^---- ') { $cur = $null }
+              elseif ($cur -and $blocs[$cur].Count -lt 3 -and $l.Trim().Length -gt 0) {
+                $blocs[$cur] += $l.Trim()
+              }
+            }
+
+            $items = @($echecs | ForEach-Object {
+              $detail = ''
+              if ($blocs.ContainsKey($_)) { $detail = ' :: ' + ($blocs[$_] -join ' | ') }
+              $s = "$_$detail"
+              if ($s.Length -gt 300) { $s.Substring(0, 300) + '...' } else { $s }
+            })
+            $batch = 10
+            $slots = 9
+            for ($i = 0; $i -lt $slots; $i++) {
+              $start = $i * $batch
+              if ($start -ge $items.Count) { break }
+              $end = [Math]::Min($start + $batch - 1, $items.Count - 1)
+              $seg = $items[$start..$end] -join ' || '
+              Write-Output "::error ::tests $($start+1)-$($end+1)/$($items.Count): $seg"
+            }
+            $couvert = [Math]::Min($slots * $batch, $items.Count)
+            if ($items.Count -gt $couvert) {
+              Write-Output "::notice ::tests: $($items.Count - $couvert) echecs restants non publies"
             }
           }
