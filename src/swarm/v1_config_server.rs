@@ -417,7 +417,7 @@ mod tests {
     }
 
     #[test]
-    fn une_chaine_vide_survit_au lieu_de_disparaitre() {
+    fn une_chaine_vide_survit_au_lieu_de_disparaitre() {
         // Piege `?` contre `??` : la source n'a ni ternaire ni coalescent, donc
         // elle ne teste pas la veracite. Une chaine vide est une chaine valide,
         // elle doit rester presente. Un `hostname: ""` ne doit PAS devenir None.

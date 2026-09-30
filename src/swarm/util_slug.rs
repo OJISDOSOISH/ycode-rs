@@ -332,7 +332,7 @@ mod tests {
     /// premier element en cas d'egalite pour le premier et le dernier pour
     /// le second. Un test qui choisirait un mot parmi d'autres de meme
     /// longueur serait faux pour une raison qui n'a rien a voir avec le code.
-    fn mots_de_longueur(table: &[&str], longueur: usize) -> Vec<&str> {
+    fn mots_de_longueur<'a>(table: &[&'a str], longueur: usize) -> Vec<&'a str> {
         table.iter().filter(|m| m.len() == longueur).copied().collect()
     }
 

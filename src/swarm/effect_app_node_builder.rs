@@ -427,7 +427,7 @@ pub fn has_replacement(replacements: &[Replacement], node: &AppNode) -> bool {
     let name = node.name();
     replacements
         .iter()
-        .any(|remplacement| replacement.source_name() == name)
+        .any(|remplacement| remplacement.source_name() == name)
 }
 
 /// Dit si l arbre `root` contient un noeud non lie portant ce nom, a n importe

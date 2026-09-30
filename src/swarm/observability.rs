@@ -408,7 +408,7 @@ impl Node {
                 Journal::Otlp { url } => Some(url),
                 _ => None,
             })?;
-        let base = url.strip_suffix(OTLP_LOGS_PATH)?;
+        let base = point.strip_suffix(OTLP_LOGS_PATH)?;
         Some(format!("{base}{OTLP_TRACES_PATH}"))
     }
 }
