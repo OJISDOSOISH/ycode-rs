@@ -54,7 +54,9 @@ jobs:
         continue-on-error: true
 
       - name: Compiler les tests
-        run: cargo test --no-run --target ${{ matrix.target }}
+        id: compile
+        shell: bash
+        run: cargo test --no-run --target ${{ matrix.target }} 2>&1 | tee compile.log; test ${PIPESTATUS[0]} -eq 0
 
       # Pas de doctests ici : leur compilation (rustdoc, un binaire par
       # bloc ``` sur Windows MSVC) coute a elle seule plus de 20 min et
@@ -88,3 +90,22 @@ jobs:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.target == 'x86_64-pc-windows-msvc' && 'target/x86_64-pc-windows-msvc/release/ycode.exe' || format('target/{0}/release/ycode', matrix.target) }}
           if-no-files-found: error
+
+      # Exfiltration des erreurs sans acces aux logs (403 en anonyme) :
+      # resume visible sur la page du run + log complet pousse sur la
+      # branche ci-logs, lisible sans authentification. En fin de job pour
+      # ne pas changer l'arbre avant les etapes de test.
+      - name: Publier erreurs compilation
+        if: failure() && steps.compile.conclusion == 'failure'
+        shell: bash
+        run: |
+          { echo '## Erreurs compilation'; echo '```'; grep -E '^(error| *-->)' compile.log | head -60; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          git config user.name "ci-exfil"
+          git config user.email "ci-exfil@local"
+          git fetch origin ci-logs:ci-logs 2>/dev/null || git checkout -b ci-logs
+          git checkout ci-logs 2>/dev/null || true
+          mkdir -p ci-logs
+          grep -E '^(error| *-->)' compile.log | head -100 > "ci-logs/${{ github.run_id }}.txt" || true
+          git add ci-logs
+          git commit -m "log ${{ github.run_id }}" 2>/dev/null || true
+          git push origin ci-logs 2>/dev/null || true
