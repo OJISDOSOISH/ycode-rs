@@ -56,8 +56,11 @@ jobs:
       - name: Compiler les tests
         run: cargo test --no-run --target ${{ matrix.target }}
 
-      - name: Lancer les tests
-        run: cargo test --target ${{ matrix.target }}
+      - name: Lancer les tests run_coordinator
+        run: cargo test --target ${{ matrix.target }} core::session::run_coordinator
+
+      - name: Lancer les autres tests
+        run: cargo test --target ${{ matrix.target }} -- --skip core::session::run_coordinator
 
       - name: Compiler la version optimisee
         run: cargo build --release --target ${{ matrix.target }}
