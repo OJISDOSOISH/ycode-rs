@@ -461,7 +461,7 @@ mod tests {
         apres.insert("zls".to_string(), Entry::Server(Server::new(vec!["zls".to_string()])));
 
         assert_eq!(
-            serde_json::to_string(&Info::Overrides(avant)).unwrap(),
+            serde_json::to_string(&Info::Overrides(avant.clone())).unwrap(),
             "{\"gopls\":{\"command\":[\"gopls\"]},\"zls\":{\"command\":[\"zls\"]}}"
         );
         assert_eq!(

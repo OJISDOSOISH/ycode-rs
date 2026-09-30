@@ -727,7 +727,8 @@ mod tests {
             fn wake(self: Arc<Self>) {}
         }
 
-        let mut contexte = Context::from_waker(&Waker::from(Arc::new(ReveilInutile)));
+        let reveil = Waker::from(Arc::new(ReveilInutile));
+        let mut contexte = Context::from_waker(&reveil);
         let mut future = Box::pin(future);
         match future.as_mut().poll(&mut contexte) {
             Poll::Ready(valeur) => valeur,
