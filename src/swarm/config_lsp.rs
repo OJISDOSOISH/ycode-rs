@@ -334,8 +334,8 @@ mod tests {
     fn une_liste_vide_est_un_choix_et_non_une_absence_de_choix() {
         let explicite: Server =
             serde_json::from_value(json!({ "command": ["x"], "extensions": [] })).unwrap();
-        assert_eq!(explicit.extensions, Some(Vec::<String>::new()));
-        assert_eq!(serde_json::to_value(&explicit).unwrap()["extensions"], json!([]));
+        assert_eq!(explicite.extensions, Some(Vec::<String>::new()));
+        assert_eq!(serde_json::to_value(&explicite).unwrap()["extensions"], json!([]));
 
         let absent = Server::new(vec!["x".to_string()]);
         assert!(serde_json::to_value(&absent).unwrap().get("extensions").is_none());

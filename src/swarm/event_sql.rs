@@ -88,7 +88,7 @@
 //! tranche ici. Le code ecrit
 //! `id: text().$type<EventV2.ID>().primaryKey()`, sans `.notNull()` ; sur la
 //! table voisine, `aggregate_id` ecrit les deux. Est-ce que `primaryKey()`
-! implique `NOT NULL` chez Drizzle ?
+//! implique `NOT NULL` chez Drizzle ?
 //!
 //! **Non, et la question a une reponse empirique dans le depot.** Trois
 //! artefacts produits par le projet lui-meme permettent de trancher :
