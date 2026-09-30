@@ -356,7 +356,7 @@ mod tests {
         let p = build_paths("/home/u", &sample_bases(), "/tmp", None);
         let json = serde_json::to_string(&p).unwrap();
         for field in ["home", "data", "cache", "config", "state", "tmp", "bin", "log", "repos"] {
-            assert!(json.contains(&format!("\"{field}\":"), "champ {field} absent du JSON"));
+            assert!(json.contains(format!("\"{field}\":").as_str()), "champ {field} absent du JSON");
         }
         let back: GlobalPaths = serde_json::from_str(&json).unwrap();
         assert_eq!(back, p);

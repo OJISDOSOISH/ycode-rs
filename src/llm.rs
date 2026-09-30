@@ -196,7 +196,8 @@ impl Llm {
         max_tokens: u32,
         temperature: f32,
     ) -> Result<Completion> {
-        let full_model = format!("{}/{}", self.model.provider, self.model.model);
+        // `self.model` est un `ModelRef` canonique : `{id, providerID, variant?}`.
+        let full_model = format!("{}/{}", self.model.provider_id, self.model.id);
 
         let req = ChatRequest {
             model: &full_model,

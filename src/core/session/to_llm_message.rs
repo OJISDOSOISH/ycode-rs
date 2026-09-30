@@ -274,7 +274,10 @@ pub fn to_llm_messages(message: &Message, target: &TargetModel) -> Vec<LlmMessag
         }],
 
         Message::Assistant(a) => {
-            let same_model = a.model.provider == target.provider && a.model.model == target.id;
+            // `a.model` est un `ModelRef` canonique `{id, providerID, variant?}`.
+            // `target` est le struct local `TargetModel { provider, id }`, dont les
+            // noms n'ont pas ete migres. D'ou le melange apparent des deux formes.
+            let same_model = a.model.provider_id == target.provider && a.model.id == target.id;
             // Une erreur invalide les metadonnees : elles decrivent un appel qui
             // n'a pas abouti, les reutiliser ferait Echouer la reprise.
             let reuse = same_model && a.error.is_none();
@@ -392,7 +395,7 @@ mod tests {
     }
 
     fn assistant_msg(provider: &str, id: &str) -> Message {
-        Message::Assistant(Assistant::new("msg_1", 1, "build", ModelRef::new(provider, id)))
+        Message::Assistant(Assistant::new("msg_1", 1, "build", ModelRef::new(id, provider)))
     }
 
     fn with_content(msg: Message, content: Vec<AssistantContent>) -> Message {
@@ -406,7 +409,7 @@ mod tests {
         // L'envoyer ferait compter un tour fantome au provider.
         let msg = Message::ModelSwitched(crate::schema::session_message::ModelSwitched {
             base: MessageBase::new("msg_1", 1),
-            model: ModelRef::new("anthropic", "claude"),
+            model: ModelRef::new("claude", "anthropic"),
         });
         assert!(to_llm_messages(&msg, &target()).is_empty());
     }

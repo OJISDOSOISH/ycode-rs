@@ -6,7 +6,7 @@ use ycode::tool::{ToolBox, Workspace};
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Petit modele heberge gratuit, choisi pour un essai rapide.
-    let model = ModelRef::new("nvidia", "nemotron-3.5-lightning-30b-a3b");
+    let model = ModelRef::new("nemotron-3.5-lightning-30b-a3b", "nvidia");
     let llm = Llm::new(model)?;
 
     let workspace = Workspace::new(std::env::current_dir()?)?;
