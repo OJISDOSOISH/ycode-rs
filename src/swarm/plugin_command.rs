@@ -820,8 +820,8 @@ mod tests {
         // `$&` redonne le motif trouve : le resultat est identique a l'entree.
         assert_eq!(remplacer_premier(texte, JETON_CHEMIN, "$&"), "a${path}b");
         // `` $` `` redonne ce qui precede, `$'` ce qui suit.
-        assert_eq!(remplacer_premier(texte, JETON_CHEMIN, "$`"), "a" + "a" + "b");
-        assert_eq!(remplacer_premier(texte, JETON_CHEMIN, "$'"), "a" + "b" + "b");
+        assert_eq!(remplacer_premier(texte, JETON_CHEMIN, "$`"), "aab");
+        assert_eq!(remplacer_premier(texte, JETON_CHEMIN, "$'"), "abb");
         // Aucun groupe capture n'existe avec un motif chaine : `$1` reste
         // litteral, comme un `$` suivi de n'importe quoi.
         assert_eq!(remplacer_premier(texte, JETON_CHEMIN, "$1"), "a$1b");

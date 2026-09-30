@@ -593,7 +593,9 @@ mod tests {
 
         /// Resolution d'un projet qui n'est dans aucun depot git.
         fn sans_git() -> Self {
-            FauxProjet { vcs: None, ..FauxProjet::git() }
+            let mut base = FauxProjet::git();
+            base.resolu.vcs = None;
+            base
         }
 
         /// Resolution qui echoue.

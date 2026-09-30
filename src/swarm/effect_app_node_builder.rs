@@ -889,7 +889,7 @@ mod tests {
         assert_eq!(vus.get(), 1);
         assert_eq!(taille.get(), 2);
         assert_eq!(
-            noms.get(),
+            noms.take(),
             "A,@opencode/example/LocationServiceMap",
             "la compilation doit voir la carte en dernier"
         );

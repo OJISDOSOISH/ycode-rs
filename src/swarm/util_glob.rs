@@ -612,7 +612,7 @@ mod tests {
         let options = Options::default();
         let vide = "";
         assert_eq!(
-            poll_scan(vide, &options),
+            poll_scan(scan(vide, &options)),
             Err::<Vec<String>, GlobError>(GlobError::BibliothequeGlobAbsente)
         );
         assert_eq!(
