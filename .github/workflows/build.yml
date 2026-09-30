@@ -96,6 +96,10 @@ jobs:
       # lisible sans authentification via l'API annotations (fichier+ligne).
       # Pas de push : le token du runner n'a pas l'ecriture (branche ci-logs
       # restee inexistante, constate sur le run precedent).
+      # Le plafond GitHub est de 10 annotations par type et par step : une
+      # erreur par annotation ne pouvait donc jamais montrer plus de 6 a 10
+      # erreurs. On batche 10 erreurs par annotation (une seule ligne, separees
+      # par " || "), soit 100 erreurs couvertes par les 10 slots disponibles.
       - name: Publier erreurs compilation
         if: failure() && steps.compile.conclusion == 'failure'
         run: |
@@ -103,26 +107,43 @@ jobs:
             Write-Output "::error ::exfil: compile.log ABSENT (tee n'a rien ecrit)"
           } else {
             $lignes = @(Get-Content compile.log)
-            Write-Output "::notice ::exfil: $($lignes.Count) lignes dans compile.log"
-            $n = 0
+            $errs = New-Object System.Collections.Generic.List[string]
             $cur = $null
-            $fini = $false
             foreach ($raw in $lignes) {
               $l = $raw -replace "`e\[[0-9;]*m", ""
               if ($l -match '^error(\[E\d+\])?: (.*)') {
-                $cur = $Matches[2]
-                $n++
-                Write-Output "::error ::$cur"
+                $msg = $Matches[2]
+                if ($msg -notmatch '^(aborting due to|could not compile)') {
+                  if ($cur) { $errs.Add("?: $cur") }
+                  $cur = $msg
+                }
               }
               elseif ($cur -and $l -match '-->\s+([^:]+):(\d+)') {
-                Write-Output "::error file=$($Matches[1]),line=$($Matches[2])::$cur"
+                $errs.Add("$($Matches[1]):$($Matches[2]): $cur")
                 $cur = $null
-                if ($n -ge 6) { $fini = $true; break }
               }
             }
-            Write-Output "::notice ::exfil: $n lignes error vues"
-            if ($n -eq 0) {
-              Write-Output "::notice ::exfil-debut-log:"
+            if ($cur) { $errs.Add("?: $cur") }
+
+            Write-Output "::notice ::exfil: $($lignes.Count) lignes log, $($errs.Count) erreurs localisees"
+            if ($errs.Count -eq 0) {
               $lignes | Select-Object -First 25 | ForEach-Object { Write-Output "::notice ::LOG: $_" }
+            } else {
+              $items = @($errs | ForEach-Object {
+                if ($_.Length -gt 170) { $_.Substring(0,170) + '...' } else { $_ }
+              })
+              $batch = 10
+              $slots = 9
+              for ($i = 0; $i -lt $slots; $i++) {
+                $start = $i * $batch
+                if ($start -ge $items.Count) { break }
+                $end = [Math]::Min($start + $batch - 1, $items.Count - 1)
+                $seg = $items[$start..$end] -join ' || '
+                Write-Output "::error ::exfil $($start+1)-$($end+1)/$($items.Count): $seg"
+              }
+              $couvert = [Math]::Min($slots * $batch, $items.Count)
+              if ($items.Count -gt $couvert) {
+                Write-Output "::notice ::exfil: $($items.Count - $couvert) erreurs restantes non publiees"
+              }
             }
           }
