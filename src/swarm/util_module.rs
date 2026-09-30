@@ -772,7 +772,8 @@ mod tests {
         }
         // Le nom du fichier d'ancrage ne doit apparaitre ni dans le resultat,
         // ni comme segment, quelle que soit la plateforme.
-        let sortie = base_dir(if cfg!(windows) { r"C:\a\b" } else { "/a/b" }).to_string_lossy();
+        let ancrage = base_dir(if cfg!(windows) { r"C:\a\b" } else { "/a/b" });
+        let sortie = ancrage.to_string_lossy();
         assert!(!sortie.contains("package.json"), "{}", sortie);
         assert!(
             !sortie

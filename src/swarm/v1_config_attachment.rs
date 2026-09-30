@@ -573,7 +573,7 @@ mod tests {
         // redimensionnement reviendrait, en silence. Le module applique la
         // famille **nullite** : la valeur presente reste presente.
         let info: Info = serde_json::from_str(r#"{"image":{"auto_resize":false}}"#).unwrap();
-        let image = info.image.expect("image absent");
+        let image = info.image.as_ref().expect("image absent");
         assert_eq!(image.auto_resize, survit_si_null(Some(false)));
         assert_ne!(
             image.auto_resize,
@@ -595,7 +595,7 @@ mod tests {
         // Deuxieme falsy du fichier. La famille `??` ne filtre que l'absence,
         // donc `0` se decode et se restitue tel quel.
         let info: Info = serde_json::from_str(r#"{"image":{"max_width":0}}"#).unwrap();
-        let image = info.image.expect("image absent");
+        let image = info.image.as_ref().expect("image absent");
         assert_eq!(image.max_width, Some(0));
         assert_eq!(
             serde_json::to_string(&info).unwrap(),
@@ -646,7 +646,7 @@ mod tests {
         // ecrite" de "le module l'a ajoute". Une valeur **differente** du
         // defaut ne doit surtout pas disparaitre au profit d'une constante.
         let saisi: Info = serde_json::from_str(r#"{"image":{"max_base64_bytes":7}}"#).unwrap();
-        let image = saisi.image.expect("image absent");
+        let image = saisi.image.as_ref().expect("image absent");
         assert_eq!(image.max_base64_bytes, Some(7));
         assert_eq!(
             serde_json::to_string(&saisi).unwrap(),

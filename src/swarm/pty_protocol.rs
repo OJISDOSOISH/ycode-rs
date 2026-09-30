@@ -232,7 +232,7 @@ impl Cadre {
         }
         match String::from_utf8(octets.to_vec()) {
             Ok(texte) => Ok(Cadre::Donnees(texte)),
-            Err(_) => Err(EreurCadre { taille: octets.len() }),
+            Err(_) => Err(ErreurCadre { taille: octets.len() }),
         }
     }
 }

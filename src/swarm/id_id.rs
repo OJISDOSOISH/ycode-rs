@@ -604,8 +604,10 @@ mod tests {
 
     #[test]
     fn ascending_and_descending_disagree_on_the_time_segment() {
-        let up = time_segment(&create("ses", Direction::Ascending, Some(1)));
-        let down = time_segment(&create("ses", Direction::Descending, Some(1)));
+        let ascending_id = create("ses", Direction::Ascending, Some(1));
+        let descending_id = create("ses", Direction::Descending, Some(1));
+        let up = time_segment(&ascending_id);
+        let down = time_segment(&descending_id);
         assert!(up.starts_with("000000001"), "{up:?}");
         assert!(down.starts_with("ffffffff"), "{down:?}");
         assert_ne!(up, down);

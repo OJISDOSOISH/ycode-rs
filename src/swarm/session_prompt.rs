@@ -248,7 +248,7 @@ mod tests {
 
         fn visiter(valeur: &serde_json::Value, chemin: &str) {
             match valeur {
-                serde_json::Value::Objet(carte) => {
+                serde_json::Value::Object(carte) => {
                     for (cle, fils) in carte {
                         assert!(
                             !cle.chars().any(|c: char| c.is_uppercase()),
@@ -257,7 +257,7 @@ mod tests {
                         visiter(fils, &format!("{chemin}.{cle}"));
                     }
                 }
-                serde_json::Value::Table(tableau) => {
+                serde_json::Value::Array(tableau) => {
                     for (rang, fils) in tableau.iter().enumerate() {
                         visiter(fils, &format!("{chemin}[{rang}]"));
                     }
@@ -330,7 +330,11 @@ mod tests {
         assert_eq!(json["files"][0]["source"]["end"].as_f64(), Some(3.25));
 
         let relu: Prompt = serde_json::from_value(json).expect("relecture");
-        assert_eq!(relu.files.expect("files")[0].source.expect("source").end, 3.25);
+        // `relu.files` est consomme, pas lu : l'indexation borrowerait et
+        // laisserait `.source` derriere. On prend donc le premier element par
+        // valeur, et `relu.agents` reste lisible, champ disjoint.
+        let premier = relu.files.expect("files").into_iter().next().expect("files");
+        assert_eq!(premier.source.expect("source").end, 3.25);
         assert!(relu.agents.is_none());
     }
 

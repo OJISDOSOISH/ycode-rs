@@ -802,10 +802,10 @@ mod tests {
         );
 
         // And on absence both are `None`: `None` is neither falsy nor null, but it
-        // disappears in both families. The type parameter is named, otherwise the
-        // bare `None` would have nothing to infer.
+        // disappears in both families. The parameter type is fixed at
+        // `Option<String>`, so the bare `None` infers from it.
         assert_eq!(disparait_si_falsy(None), None);
-        assert_eq!(survit_si_null::<String>(None), None);
+        assert_eq!(survit_si_null(None), None);
 
         // The consumer's filter is the truthiness family, and it drops what the
         // schema legitimately accepted.
@@ -920,13 +920,13 @@ mod tests {
         // would accept it. `serde_json` refuses a JSON float where an integer is
         // expected. Kept, because a float count has no meaning and no producer
         // emits one.
-        assert!(serde_json::from_str::<ConsoleState>(&format!("{{{modele}0.0}}}")).is_err());
+        assert!(serde_json::from_str::<ConsoleState>(&format!("{{{modele}0.0}}")).is_err());
 
         // Documented divergence, laxer side: `Schema.Int` is a JavaScript integer,
         // capped by `Number.MAX_SAFE_INTEGER`. `u64` has no such cap. Accepted
         // here, and the exact ceiling of the effect schema could not be observed
         // on this machine.
-        let grand = format!("{{{modele}9007199254740993}}}");
+        let grand = format!("{{{modele}9007199254740993}}");
         let etat: ConsoleState = serde_json::from_str(&grand).unwrap();
         assert_eq!(etat.switchable_org_count, 9_007_199_254_740_993);
         assert_eq!(

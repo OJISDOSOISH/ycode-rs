@@ -480,30 +480,46 @@ mod tests {
         fn dispose(&self) {}
     }
 
-    /// Implementation d'essai du trait `Proc`, qui ne simule ni terminal ni
-    /// processus : elle note les appels et distribue immediatement les
-    /// ecouteurs, parce qu'il n'y a rien derriere.
-    struct FauxPty {
+    /// Etat note par le faux terminal, que le test relit apres l'avoir passe
+    /// a [`spawn`].
+    struct EtatFaux {
         journal: RefCell<Vec<String>>,
         pid: Cell<u32>,
     }
 
+    /// Implementation d'essai du trait `Proc`, qui ne simule ni terminal ni
+    /// processus : elle note les appels et distribue immediatement les
+    /// ecouteurs, parce qu'il n'y a rien derriere.
+    ///
+    /// C'est une **poignee** vers un [`EtatFaux`] partage, et non l'etat
+    /// lui-meme. [`spawn`] consomme l'implementation qu'on lui remet, et le
+    /// test doit malgre tout relire le journal et le pid apres la
+    /// construction, pour verifier que la delegation agit et que le `pid`, lui,
+    /// est une photographie. Une poignee `Copy` rend l'etat observable par les
+    /// deux cotes, sans que le test ait a cloner quoi que ce soit.
+    #[derive(Clone, Copy)]
+    struct FauxPty(&'static EtatFaux);
+
     impl FauxPty {
         fn nouveau() -> Self {
-            Self {
+            // L'etat est vole dans une adresse statique : il vit jusqu'a la fin
+            // du programme de test, comme les `OnceLock`.installes plus bas par
+            // `Box::leak`. Aucun partage entre taches n'est demande, donc
+            // `Rc` n'aurait rien a securiser.
+            Self(Box::leak(Box::new(EtatFaux {
                 journal: RefCell::new(Vec::new()),
                 pid: Cell::new(4242),
-            }
+            })))
         }
 
         fn journal(&self) -> Vec<String> {
-            self.journal.borrow().clone()
+            self.0.journal.borrow().clone()
         }
     }
 
     impl Proc for FauxPty {
         fn pid(&self) -> u32 {
-            self.pid.get()
+            self.0.pid.get()
         }
 
         fn on_data(&self, mut listener: DataListener) -> Box<dyn Disp> {
@@ -521,11 +537,12 @@ mod tests {
         }
 
         fn write(&self, data: &str) {
-            self.journal.borrow_mut().push(format!("write({})", data));
+            self.0.journal.borrow_mut().push(format!("write({})", data));
         }
 
         fn resize(&self, cols: u32, rows: u32) {
-            self.journal
+            self.0
+                .journal
                 .borrow_mut()
                 .push(format!("resize({},{})", cols, rows));
         }
@@ -537,7 +554,7 @@ mod tests {
                 None => "kill(aucun)".to_string(),
                 Some(nom) => format!("kill({})", nom),
             };
-            self.journal.borrow_mut().push(entree);
+            self.0.journal.borrow_mut().push(entree);
         }
     }
 

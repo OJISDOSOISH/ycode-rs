@@ -1456,11 +1456,8 @@ mod tests {
         // `[SessionStore.node, LocationServiceMap.node]`: the store is read
         // first, the service map is provided afterwards. Swapping them would
         // build a graph that reads as valid and behaves differently.
-        let services: Vec<&str> = node()
-            .deps
-            .iter()
-            .map(|dep| dep.service.as_str())
-            .collect();
+        let n = node();
+        let services: Vec<&str> = n.deps.iter().map(|dep| dep.service.as_str()).collect();
         assert_eq!(
             services,
             vec!["@opencode/v2/SessionStore", "@opencode/example/LocationServiceMap"]

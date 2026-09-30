@@ -217,7 +217,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::core::model::{ModelApi, ModelInfo, ModelRef, ModelVariant};
+use crate::core::model::{empty_info, ModelApi, ModelInfo, ModelRef, ModelVariant};
 
 /// Plugin identifier, exactly as registered with `define`.
 ///
@@ -466,7 +466,7 @@ impl Catalog {
         let position = match models.iter().position(|model| model.id == key.id) {
             Some(position) => position,
             None => {
-                models.push(ModelInfo::empty_info(&key.provider_id, &key.id));
+                models.push(empty_info(&key.provider_id, &key.id));
                 models.len() - 1
             }
         };
@@ -663,7 +663,7 @@ mod tests {
 
     /// A `native` model, which is what every rejection path starts from.
     fn native(id: &str) -> ModelInfo {
-        ModelInfo::empty_info("acme", id)
+        empty_info("acme", id)
     }
 
     /// An `aisdk` model with a chosen package and a chosen `api.id`.

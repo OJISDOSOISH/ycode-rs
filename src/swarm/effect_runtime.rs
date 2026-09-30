@@ -926,7 +926,13 @@ mod tests {
         let plan_chaine = rt.run_sync::<String, String>();
         let plan_unitaire = rt.run_sync::<(), ()>();
 
-        assert_eq!(plan_chaine, plan_unitaire);
+        // `Run<String, String>` et `Run<(), ()>` portent des `PhantomData`
+        // differents : ce ne sont pas le meme type, donc `assert_eq!` ne peut
+        // pas les opposer. Tout ce que le plan expose l'est.
+        assert_eq!(plan_chaine.entry(), plan_unitaire.entry());
+        assert_eq!(plan_chaine.service(), plan_unitaire.service());
+        assert_eq!(plan_chaine.options(), plan_unitaire.options());
+        assert_eq!(plan_chaine.etat, plan_unitaire.etat);
     }
 
     #[test]
@@ -964,11 +970,8 @@ mod tests {
         // `provideMerge(self, that)` : d'abord la couche de l'application,
         // ensuite celle qui recoit.
         let composition = Composition::new(LayerKey::new("SessionLayer"));
-        let noms: Vec<&str> = composition
-            .couches()
-            .iter()
-            .map(|couche| couche.name())
-            .collect();
+        let couches = composition.couches();
+        let noms: Vec<&str> = couches.iter().map(|couche| couche.name()).collect();
 
         assert_eq!(noms, vec!["SessionLayer", NODE_NAME]);
         assert_eq!(composition.applicative().name(), "SessionLayer");
