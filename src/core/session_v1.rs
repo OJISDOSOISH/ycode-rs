@@ -21,10 +21,13 @@
 //! - tout champ optionnel TS est un `Option` avec `skip_serializing_if`.
 //! - `NonNegativeInt` -> `i64`, `Schema.Finite` -> `f64`,
 //!   `Record<string, ...>` -> `BTreeMap` deterministe.
-//! - les erreurs nommees TS (`{ name, data }`) sont portees en deux morceaux :
-//!   un struct `...Data` pour `data`, et l enum `AssistantError` qui porte le
-//!   tag `name`. Seule `ApiError` garde une struct d enveloppe `{ name, data }`
-//!   car `RetryPart.error` l utilise hors union.
+//! - TS named errors serialize on two levels: `{ "name": "...", "data": {...} }`
+//!   (namedError in v1/session.ts). Each variant of `AssistantError` is a
+//!   newtype over its `...Data` struct and serde uses adjacent tagging
+//!   (`tag = "name"`, `content = "data"`) to reproduce both levels. A plain
+//!   internal tag would flatten the payload beside the tag and write a shape
+//!   no TS reader accepts. `RetryPart.error` keeps the standalone `ApiError`
+//!   struct because it sits outside the union.
 //! - les enveloppes d evenements (`define`, `inventory`, `aggregate`) sont du
 //!   routage TS : seules les charges `schema` sont portees ici, sans le champ
 //!   `type` de routage.
@@ -139,9 +142,13 @@ pub struct UnknownErrorData {
     pub ref_: Option<String>,
 }
 
-/// Union des erreurs d un message assistant, taggee sur `name` en TS.
+/// Assistant message error union. TS serializes every member as
+/// `{ "name": "...", "data": { ... } }`, so the wire shape needs serde's
+/// adjacent tagging: the tag in `name`, the payload in `data`. A plain
+/// internal tag would flatten the payload beside the tag and break every
+/// TS reader of `Assistant.error` and of the `session.error` event payload.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "name")]
+#[serde(tag = "name", content = "data")]
 pub enum AssistantError {
     #[serde(rename = "ProviderAuthError")]
     ProviderAuth(ProviderAuthData),
@@ -1072,7 +1079,7 @@ mod tests {
     }
 
     #[test]
-    fn une_erreur_api_garde_son_tag_name() {
+    fn api_error_keeps_the_name_and_data_levels() {
         let erreur = AssistantError::Api(ApiErrorData {
             message: "panne".to_string(),
             status_code: Some(500),
@@ -1083,10 +1090,31 @@ mod tests {
         });
         let v = serde_json::to_value(&erreur).unwrap();
         assert_eq!(v["name"], "APIError");
-        assert_eq!(v["statusCode"], 500);
-        assert_eq!(v["isRetryable"], true);
+        assert_eq!(v["data"]["statusCode"], 500);
+        assert_eq!(v["data"]["isRetryable"], true);
+        // The payload must never sit beside the tag: that flat shape is what
+        // plain internal tagging writes, and no TS reader accepts it.
+        assert!(v.get("statusCode").is_none());
         let retour: AssistantError = serde_json::from_value(v).unwrap();
         assert_eq!(retour, erreur);
+    }
+
+    #[test]
+    fn unknown_error_parses_the_ts_literal_shape() {
+        // Exactly what a TS-written v1 file contains for
+        // `error: Schema.optional(AssistantErrorSchema)`.
+        let lit = serde_json::json!({
+            "name": "UnknownError",
+            "data": { "message": "boom", "ref": "ref_1" }
+        });
+        let e: AssistantError = serde_json::from_value(lit).unwrap();
+        match e {
+            AssistantError::Unknown(d) => {
+                assert_eq!(d.message, "boom");
+                assert_eq!(d.ref_, Some("ref_1".to_string()));
+            }
+            _ => panic!("expected the UnknownError variant"),
+        }
     }
 
     #[test]
