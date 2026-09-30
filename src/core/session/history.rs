@@ -1,4 +1,4 @@
-﻿//! Portage Rust de `opencode/packages/core/src/session/history.ts`.
+//! Portage Rust de `opencode/packages/core/src/session/history.ts`.
 //!
 //! C'est la mecanique qui permet de depasser la fenetre de contexte du modele,
 //! et c'est la partie la plus subtile de tout le projet. Deux mecanismes se
@@ -175,7 +175,7 @@ mod tests {
     fn assistant(seq: i64, id: &str) -> Entry {
         Entry {
             seq,
-            message: Message::Assistant(Assistant::new(id, seq, "build", ModelRef::new("p", "m"))),
+            message: Message::Assistant(Assistant::new(id, seq, "build", ModelRef::new("m", "p"))),
         }
     }
 

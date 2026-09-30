@@ -455,7 +455,7 @@ mod tests {
     #[test]
     fn une_erreur_invalide_la_reutilisation_des_metadonnees() {
         let meta = serde_json::json!({"cache": "x"});
-        let mut a = Assistant::new("msg_1", 1, "build", ModelRef::new("openai", "gpt-4"));
+        let mut a = Assistant::new("msg_1", 1, "build", ModelRef::new("gpt-4", "openai"));
         a.error = Some(crate::schema::session_message::UnknownError::new("boom"));
         a.content.push(AssistantContent::Reasoning {
             id: "r1".into(),
@@ -512,7 +512,7 @@ mod tests {
 
     #[test]
     fn un_outil_en_attente_na_pas_de_resultat() {
-        let mut a = Assistant::new("msg_1", 1, "build", ModelRef::new("openai", "gpt-4"));
+        let mut a = Assistant::new("msg_1", 1, "build", ModelRef::new("gpt-4", "openai"));
         a.content.push(AssistantContent::Tool(AssistantTool {
             id: "call_1".into(),
             name: "read".into(),
@@ -533,7 +533,7 @@ mod tests {
 
     #[test]
     fn un_outil_local_genere_un_message_outil_separe() {
-        let mut a = Assistant::new("msg_1", 1, "build", ModelRef::new("openai", "gpt-4"));
+        let mut a = Assistant::new("msg_1", 1, "build", ModelRef::new("gpt-4", "openai"));
         a.content.push(AssistantContent::Tool(AssistantTool {
             id: "call_1".into(),
             name: "read".into(),
