@@ -896,7 +896,7 @@ mod tests {
     /// stricter than the JavaScript check.
     #[test]
     fn switchable_org_count_refuses_what_the_schema_refuses() {
-        let modele = r#""consoleManagedProviders":[],"switchableOrgCount":";
+        let modele = r#""consoleManagedProviders":[],"switchableOrgCount":"#;
 
         // Refused on both sides: the signed range, the non-integers, the strings,
         // the booleans.
