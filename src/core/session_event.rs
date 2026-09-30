@@ -843,7 +843,7 @@ mod tests {
             "id": "evt_3",
             "type": "session.next.text.delta",
             "data": {
-                "timestamp": 1_700_000_000_000,
+                "timestamp": 1_700_000_000_000i64,
                 "sessionID": "ses_abc",
                 "assistantMessageID": "msg_a",
                 "textID": "txt_1",
@@ -866,7 +866,7 @@ mod tests {
             "id": "evt_4",
             "type": "session.next.tool.input.delta",
             "data": {
-                "timestamp": 1_700_000_000_000,
+                "timestamp": 1_700_000_000_000i64,
                 "sessionID": "ses_abc",
                 "assistantMessageID": "msg_a",
                 "callID": "call_1",
@@ -883,7 +883,7 @@ mod tests {
             "id": "evt_5",
             "type": "session.next.compaction.ended",
             "data": {
-                "timestamp": 1_700_000_000_000,
+                "timestamp": 1_700_000_000_000i64,
                 "sessionID": "ses_abc",
                 "messageID": "msg_1",
                 "reason": "manual",
