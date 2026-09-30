@@ -60,18 +60,23 @@ jobs:
       # bloc ``` sur Windows MSVC) coute a elle seule plus de 20 min et
       # masquait tout signal. Les doctests auront leur propre job plus tard.
       - name: Test coordinator simple
+        if: always()
         run: cargo test --target ${{ matrix.target }} --lib --bins --tests -- --exact core::session::run_coordinator::tests::execution_simple_sans_concurrence
 
       - name: Test coordinator wake coalesce
+        if: always()
         run: cargo test --target ${{ matrix.target }} --lib --bins --tests -- --exact core::session::run_coordinator::tests::wake_coalesce_plusieurs_wakes_en_un_seul_successeur
 
       - name: Test coordinator wake pendant execution
+        if: always()
         run: cargo test --target ${{ matrix.target }} --lib --bins --tests -- --exact core::session::run_coordinator::tests::wake_pendant_execution_planifie_un_successeur
 
       - name: Test coordinator cles differentes
+        if: always()
         run: cargo test --target ${{ matrix.target }} --lib --bins --tests -- --exact core::session::run_coordinator::tests::cles_differentes_s_executent_concurremment
 
       - name: Lancer les autres tests
+        if: always()
         run: cargo test --target ${{ matrix.target }} --lib --bins --tests -- --skip core::session::run_coordinator
 
       - name: Compiler la version optimisee
