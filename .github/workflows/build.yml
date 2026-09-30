@@ -102,9 +102,12 @@ jobs:
           if (!(Test-Path compile.log)) {
             Write-Output "::error ::exfil: compile.log ABSENT (tee n'a rien ecrit)"
           } else {
+            $lignes = @(Get-Content compile.log)
+            Write-Output "::notice ::exfil: $($lignes.Count) lignes dans compile.log"
             $n = 0
             $cur = $null
-            foreach ($raw in Get-Content compile.log) {
+            $fini = $false
+            foreach ($raw in $lignes) {
               $l = $raw -replace "`e\[[0-9;]*m", ""
               if ($l -match '^error(\[E\d+\])?: (.*)') {
                 $cur = $Matches[2]
@@ -114,7 +117,12 @@ jobs:
               elseif ($cur -and $l -match '-->\s+([^:]+):(\d+)') {
                 Write-Output "::error file=$($Matches[1]),line=$($Matches[2])::$cur"
                 $cur = $null
+                if ($n -ge 6) { $fini = $true; break }
               }
             }
-            Write-Output "::notice ::exfil: $n lignes error vues dans compile.log"
+            Write-Output "::notice ::exfil: $n lignes error vues"
+            if ($n -eq 0) {
+              Write-Output "::notice ::exfil-debut-log:"
+              $lignes | Select-Object -First 25 | ForEach-Object { Write-Output "::notice ::LOG: $_" }
+            }
           }
