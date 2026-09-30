@@ -5,11 +5,14 @@
 
 pub mod compaction;
 pub mod context_epoch;
+pub mod execution;
 pub mod history;
+pub mod info;
 pub mod max_steps;
 pub mod model_route;
 pub mod revert;
 pub mod run_coordinator;
+pub mod schema;
 pub mod todo;
 pub mod to_llm_message;
 pub mod turn;

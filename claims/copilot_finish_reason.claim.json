@@ -1,0 +1,1 @@
+﻿{"owner":"kilo-swarm","started":"2026-09-29T22:20:54Z","source":"packages/core/src/github-copilot/chat/map-openai-compatible-finish-reason.ts","target":"src/swarm/copilot_finish_reason.rs"}

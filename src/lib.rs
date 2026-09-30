@@ -12,3 +12,5 @@ pub mod permission;
 pub mod policy;
 pub mod question;
 pub mod tool;
+
+pub mod swarm;
