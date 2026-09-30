@@ -374,6 +374,39 @@ mod tests {
 
     type TestError = Box<dyn std::error::Error + Send + Sync>;
 
+    /// Attend un drapeau avec timeout : un oubli de notification devient
+    /// un echec nomme en 10 s au lieu d'une pendaison infinie de la CI.
+    fn attendre_flag(barriere: &(Mutex<bool>, Condvar), etape: &str) {
+        let (lock, cvar) = barriere;
+        let mut garde = lock.lock().unwrap();
+        loop {
+            if *garde {
+                return;
+            }
+            let (g, resultat) = cvar.wait_timeout(garde, Duration::from_secs(10)).unwrap();
+            garde = g;
+            if resultat.timed_out() && !*garde {
+                panic!("barriere bloquee sans notification : {}", etape);
+            }
+        }
+    }
+
+    /// Meme garde pour un compteur : attend qu'il atteigne `cible`.
+    fn attendre_compte(barriere: &(Mutex<i32>, Condvar), cible: i32, etape: &str) {
+        let (lock, cvar) = barriere;
+        let mut garde = lock.lock().unwrap();
+        loop {
+            if *garde >= cible {
+                return;
+            }
+            let (g, resultat) = cvar.wait_timeout(garde, Duration::from_secs(10)).unwrap();
+            garde = g;
+            if resultat.timed_out() && *garde < cible {
+                panic!("compteur bloque sans notification : {}", etape);
+            }
+        }
+    }
+
     #[test]
     fn execution_simple_sans_concurrence() {
         let counter = Arc::new(AtomicUsize::new(0));
@@ -405,15 +438,12 @@ mod tests {
                 *lock.lock().unwrap() = true;
                 cvar.notify_one();
             }
-            // Attendre le signal de fin.
+            // Attendre le signal de fin (garde anti-pendaison).
             {
-                let (lock, cvar) = &*done_barrier_clone;
-                let mut count = lock.lock().unwrap();
-                *count += 1;
-                while *count < 2 {
-                    count = cvar.wait(count).unwrap();
-                }
+                let (lock, _cvar) = &*done_barrier_clone;
+                *lock.lock().unwrap() += 1;
             }
+            attendre_compte(&done_barrier_clone, 2, "fin du premier run");
             counter_clone.fetch_add(1, Ordering::SeqCst);
             Ok(())
         });
@@ -423,14 +453,8 @@ mod tests {
             coord.run(1).unwrap();
         });
 
-        // Attendre que le premier run commence.
-        {
-            let (lock, cvar) = &*start_barrier;
-            let mut started = lock.lock().unwrap();
-            while !*started {
-                started = cvar.wait(started).unwrap();
-            }
-        }
+        // Attendre que le premier run commence (garde anti-pendaison).
+        attendre_flag(&start_barrier, "demarrage du premier run");
 
         // Deuxieme run pour la meme cle - doit attendre.
         let result: Result<(), TestError> = coord_clone.run(1);
@@ -493,19 +517,14 @@ mod tests {
 
         let coord = Coordinator::new(move |_key: u32, force: bool| -> Result<(), TestError> {
             if force {
-                // Premiere execution : signaler le demarrage et attendre.
+                // Premiere execution : signaler le demarrage et attendre
+                // (garde anti-pendaison).
                 {
                     let (lock, cvar) = &*start_barrier_clone;
                     *lock.lock().unwrap() = true;
                     cvar.notify_one();
                 }
-                {
-                    let (lock, cvar) = &*continue_barrier_clone;
-                    let mut cont = lock.lock().unwrap();
-                    while !*cont {
-                        cont = cvar.wait(cont).unwrap();
-                    }
-                }
+                attendre_flag(&continue_barrier_clone, "liberation de l'execution");
             }
             counter_clone.fetch_add(1, Ordering::SeqCst);
             Ok(())
@@ -517,14 +536,8 @@ mod tests {
             coord.run(1).unwrap();
         });
 
-        // Attendre que l'execution commence.
-        {
-            let (lock, cvar) = &*start_barrier;
-            let mut started = lock.lock().unwrap();
-            while !*started {
-                started = cvar.wait(started).unwrap();
-            }
-        }
+        // Attendre que l'execution commence (garde anti-pendaison).
+        attendre_flag(&start_barrier, "demarrage de l'execution");
 
         // Envoyer un wake pendant l'execution.
         coord_clone.wake(1);
@@ -572,14 +585,8 @@ mod tests {
             move || coord.run(1)
         });
 
-        // Attendre le demarrage.
-        {
-            let (lock, cvar) = &*start_barrier;
-            let mut started = lock.lock().unwrap();
-            while !*started {
-                started = cvar.wait(started).unwrap();
-            }
-        }
+        // Attendre le demarrage (garde anti-pendaison).
+        attendre_flag(&start_barrier, "demarrage avant interruption");
 
         // Interrompre.
         Coordinator::new((*coord.drain).clone()).interrupt(1);
@@ -600,15 +607,9 @@ mod tests {
 
         let coord = Coordinator::new(move |_key: u32, _force: bool| -> Result<(), TestError> {
             let (lock, cvar) = &*barrier_clone;
-            let mut count = lock.lock().unwrap();
-            *count += 1;
-            if *count == 2 {
-                cvar.notify_all();
-            } else {
-                while *count < 2 {
-                    count = cvar.wait(count).unwrap();
-                }
-            }
+            *lock.lock().unwrap() += 1;
+            cvar.notify_all();
+            let _garde = attendre_compte(&barrier_clone, 2, "rendez-vous des deux cles");
             counter_clone.fetch_add(1, Ordering::SeqCst);
             Ok(())
         });

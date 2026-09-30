@@ -1,0 +1,1 @@
+{"owner":"opencode","source":"opencode/packages/core/src/session/run-coordinator.ts","started":"2026-09-30T15:10:00Z","target":"src/core/session/run_coordinator.rs","note":"orphelin sans claim, reaffecte pourcorriger les tests threads sans timeout (CI etape 7 pendue)"}
