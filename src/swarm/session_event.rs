@@ -130,7 +130,10 @@ mod tests {
             "id": "evt_3",
             "type": "session.next.agent.switched",
             "data": {
-                "timestamp": 1_700_000_000_000,
+                // `1_700_000_000_000` ms is a millisecond timestamp, far past
+                // `i32::MAX`. Without the suffix, integer inference picks `i32`
+                // and the literal is out of range. Same trap as core/session/schema.rs.
+                "timestamp": 1_700_000_000_000i64,
                 "sessionId": "ses_abc",
                 "messageId": "msg_1",
                 "agent": "plan"
