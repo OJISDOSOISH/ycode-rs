@@ -169,7 +169,7 @@ fn release_in<K: Ord>(
     held: bool,
 ) -> Option<Completion> {
     let entry = state.get_mut(key)?;
-    let _still_queued = entry.waiters.remove(&id);
+    let _still_queued = entry.waiters.iter().position(|w| *w == id).map(|i| entry.waiters.remove(i));
     let mut handed_over = None;
     if held && entry.holder == Some(id) {
         entry.holder = entry.waiters.pop_front();

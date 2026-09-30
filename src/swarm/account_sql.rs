@@ -1537,7 +1537,7 @@ mod tests {
         for (ligne, colonnes) in paires {
             let objet = ligne.as_object().unwrap();
             for nom in colonnes {
-                assert!(objet.contains_key(nom), "la colonne {nom} doit exister dans la ligne");
+                assert!(objet.contains_key(*nom), "la colonne {nom} doit exister dans la ligne");
             }
             assert_eq!(objet.len(), colonnes.len(), "aucune colonne en trop ni en trop peu");
         }

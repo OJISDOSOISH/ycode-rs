@@ -715,7 +715,7 @@ mod tests {
         );
     }
 
-    #[derive(Deserialize)]
+    #[derive(Default, Deserialize)]
     #[serde(default)]
     struct NaiveConfigProbe {
         provider: Option<String>,
@@ -771,7 +771,7 @@ mod tests {
         );
         assert_eq!(serde_json::to_value(&empty).unwrap(), json!([]));
 
-        assert!(!is_file_id("file-abc", None.as_deref()));
+        assert!(!is_file_id("file-abc", None::<&[String]>.as_deref()));
         assert!(!is_file_id("file-abc", empty.as_deref()));
         assert!(is_file_id("file-abc", Some(&[String::from("file-")])));
 

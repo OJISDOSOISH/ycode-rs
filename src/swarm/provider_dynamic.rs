@@ -1066,19 +1066,17 @@ mod tests {
 
     #[test]
     fn seul_un_prefixe_exact_de_create_qualifie_un_export() {
-        let qualifie = |noms: &[&str]| {
-            premier_export(&noms.iter().map(|n| n.to_string()).collect::<Vec<String>>())
-        };
-        assert_eq!(qualifie(&["create"]), Some("create"));
-        assert_eq!(qualifie(&["createOpenAI"]), Some("createOpenAI"));
-        assert_eq!(qualifie(&["default", "createX"]), Some("createX"));
+        let qualifie = |noms: &[String]| premier_export(noms);
+        assert_eq!(qualifie(&["create".to_string()]), Some("create"));
+        assert_eq!(qualifie(&["createOpenAI".to_string()]), Some("createOpenAI"));
+        assert_eq!(qualifie(&["default".to_string(), "createX".to_string()]), Some("createX"));
         // Ces cinq echouent : le prefixe est sensible a la casse, un prefixe
         // partiel ne suffit pas, et la chaine vide ne commence par rien.
-        assert_eq!(qualifie(&["created"]), None);
-        assert_eq!(qualifie(&["Create"]), None);
-        assert_eq!(qualifie(&["creat"]), None);
-        assert_eq!(qualifie(&["default", "other"]), None);
-        assert_eq!(qualifie(&[""]), None);
+        assert_eq!(qualifie(&["created".to_string()]), None);
+        assert_eq!(qualifie(&["Create".to_string()]), None);
+        assert_eq!(qualifie(&["creat".to_string()]), None);
+        assert_eq!(qualifie(&["default".to_string(), "other".to_string()]), None);
+        assert_eq!(qualifie(&["".to_string()]), None);
     }
 
     #[test]

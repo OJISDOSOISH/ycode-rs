@@ -395,7 +395,7 @@ fn to_base36(value: u32) -> String {
     let mut reversed: Vec<u8> = Vec::with_capacity(7);
     let mut rest = value;
     loop {
-        reversed.push(DIGITS[usize::from(rest % 36)]);
+        reversed.push(DIGITS[(rest % 36) as usize]);
         rest /= 36;
         if rest == 0 {
             break;

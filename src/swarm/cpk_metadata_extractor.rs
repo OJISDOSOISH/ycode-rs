@@ -686,7 +686,7 @@ impl MetadataExtractor for CopilotMetadataExtractor {
 
     fn create_stream_extractor(&self) -> Box<dyn StreamMetadataExtractor> {
         Box::new(CopilotStreamMetadataExtractor::new(
-            self.provider_options_name.clone(),
+            &self.provider_options_name,
         ))
     }
 }
@@ -1135,7 +1135,7 @@ mod tests {
             let attendu = if falsy == Value::Null {
                 None
             } else {
-                Some(falsy.clone())
+                Some(&falsy)
             };
             assert_eq!(par_nullite, attendu, "nullity on {}", falsy);
         }

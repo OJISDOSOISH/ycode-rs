@@ -448,11 +448,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
     use std::collections::BTreeSet;
 
     /// A fake file system: the set of paths that exist and are executable.
     /// Nothing is read from disk, so a test is a few nanoseconds.
-    fn fake(paths: &[&str]) -> impl Fn(&str) -> bool + '_ {
+    fn fake<'a>(paths: &'a [&'a str]) -> impl Fn(&str) -> bool + 'a {
         let set: BTreeSet<String> = paths.iter().map(|p| p.to_string()).collect();
         move |candidate: &str| set.contains(candidate)
     }
@@ -774,13 +775,13 @@ mod tests {
         let probe = fake(&["C:\\bin\\node.EXE"]);
         assert_eq!(which("node", Some(&env), &[], "C:\\bin", &probe), Some(String::from("C:\\bin\\node.EXE")));
         // The bin directory is reached exactly once, not twice.
-        let mut calls = Vec::new();
+        let calls = RefCell::new(Vec::new());
         let counting = |path: &str| {
-            calls.push(path.to_string());
+            calls.borrow_mut().push(path.to_string());
             path.ends_with("node.EXE")
         };
         which("node", Some(&env), &[], "C:\\bin", &counting);
-        assert_eq!(calls, vec![String::from("C:\\bin\\node.COM"), String::from("C:\\bin\\node.EXE")]);
+        assert_eq!(*calls.borrow(), vec![String::from("C:\\bin\\node.COM"), String::from("C:\\bin\\node.EXE")]);
     }
 
     #[test]

@@ -280,7 +280,7 @@ impl Sleeper for ThreadSleeper {
 ///
 /// La source leve `error` (dernier ecueil rencontre) ou `lastError`, qui peut
 /// valoir `undefined` si la boucle n'a jamais tourne.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum RetryFailure<E> {
     /// La boucle a echappe par un `throw error`, apres `invocations` appels de
     /// l'operation.
@@ -862,7 +862,20 @@ mod tests {
             &RetryOptions::new().attempts(0.0),
             &mut journal,
         );
-        assert_eq!(resultat, Err(RetryFailure::NoAttempt { attempts: 0.0 }));
+        // `NoAttempt` carries `attempts: f64`, and `PartialEq` on `f64` gives
+// `NaN != NaN` and `-0.0 == 0.0`. That matches the JavaScript `===` the
+// source uses, BUT it means an `assert_eq!` on this variant silently fails
+// whenever `attempts` is `NaN`, and the module doc lists `NaN` as a supported
+// state. Matching on the discriminant, then comparing the field separately,
+// is therefore the honest form: it asserts the variant without depending on
+// how a float compares to itself.
+let echec = resultat.unwrap_err();
+match echec {
+    RetryFailure::NoAttempt { attempts } => {
+        assert_eq!(attempts, 0.0, "zero attempts, so attempts must be 0");
+    }
+    autre => panic!("expected NoAttempt, got {autre:?}"),
+}
         assert_eq!(appels, 0);
         assert!(journal.delais.is_empty());
         assert_eq!(resultat.unwrap_err().error(), None);

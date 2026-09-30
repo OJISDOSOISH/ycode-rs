@@ -303,7 +303,7 @@ mod tests {
         // null, mais il disparait dans les deux cas. Le type du parametre est
         // nomme ici, sinon le `None` seul ne donne rien a compiler.
         assert_eq!(disparait_si_falsy(None), None);
-        assert_eq!(survit_si_null::<String>(None), None);
+        assert_eq!(survit_si_null(None), None);
     }
 
     #[test]
@@ -452,7 +452,7 @@ mod tests {
         // Aucun des deux operateurs n est applique : rien n est remplace par un
         // defaut, rien n est ecrit `null`, rien n est supprime en silence.
         // Seule l absence reste une absence, et c est le lecteur qui tranche.
-        let porteur: Porteur = serde_json::from_str(r#"{"layout":""}"#);
+        let porteur = serde_json::from_str::<Porteur>(r#"{"layout":""}"#);
         assert!(porteur.is_err(), "la chaine vide a ete acceptee");
     }
 

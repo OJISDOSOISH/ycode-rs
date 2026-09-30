@@ -508,7 +508,7 @@ pub fn grown_buffer_length(body_length: u64, needed: u64, maximum_bytes: u64) ->
 pub fn collect_bounded_response_body<E, F>(
     headers: &ResponseHeaders,
     maximum_bytes: u64,
-    too_large: F,
+    mut too_large: F,
     flux: ResponseStream,
 ) -> Result<BoundedBody, E>
 where
