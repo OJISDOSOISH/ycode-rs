@@ -863,22 +863,26 @@ mod tests {
             &mut journal,
         );
         // `NoAttempt` carries `attempts: f64`, and `PartialEq` on `f64` gives
-// `NaN != NaN` and `-0.0 == 0.0`. That matches the JavaScript `===` the
-// source uses, BUT it means an `assert_eq!` on this variant silently fails
-// whenever `attempts` is `NaN`, and the module doc lists `NaN` as a supported
-// state. Matching on the discriminant, then comparing the field separately,
-// is therefore the honest form: it asserts the variant without depending on
-// how a float compares to itself.
-let echec = resultat.unwrap_err();
-match echec {
-    RetryFailure::NoAttempt { attempts } => {
-        assert_eq!(attempts, 0.0, "zero attempts, so attempts must be 0");
-    }
-    autre => panic!("expected NoAttempt, got {autre:?}"),
-}
+        // `NaN != NaN` and `-0.0 == 0.0`. That matches the JavaScript `===` the
+        // source uses, BUT it means an `assert_eq!` on this variant silently fails
+        // whenever `attempts` is `NaN`, and the module doc lists `NaN` as a supported
+        // state. Matching on the discriminant, then comparing the field separately,
+        // is therefore the honest form: it asserts the variant without depending on
+        // how a float compares to itself. The match borrows, so `error()` below is
+        // the one and only consumption of `resultat`.
+        let echec = match resultat {
+            Ok(valeur) => panic!("expected NoAttempt, got Ok({valeur:?})"),
+            Err(echec) => echec,
+        };
+        match &echec {
+            RetryFailure::NoAttempt { attempts } => {
+                assert_eq!(*attempts, 0.0, "zero attempts, so attempts must be 0");
+            }
+            autre => panic!("expected NoAttempt, got {autre:?}"),
+        }
         assert_eq!(appels, 0);
         assert!(journal.delais.is_empty());
-        assert_eq!(resultat.unwrap_err().error(), None);
+        assert_eq!(echec.error(), None);
     }
 
     #[test]
@@ -895,8 +899,31 @@ match echec {
                 &mut journal,
             );
             assert_eq!(appels, 0, "aucun appel pour {}", configure);
-            assert!(matches!(resultat, Err(RetryFailure::NoAttempt { .. })));
             assert!(journal.delais.is_empty());
+
+            // The payload is asserted, not just the variant. With
+            // `matches!(.. { .. })` the `attempts` value was never checked, so
+            // the `NaN` case the module doc calls supported had NO coverage at
+            // all: any value, including a wrong one, would have passed.
+            //
+            // `is_nan` is used rather than `assert_eq!` because `NaN != NaN`.
+            // For the finite members the exact value is asserted.
+            let attempts = match resultat {
+                Err(RetryFailure::NoAttempt { attempts }) => attempts,
+                Ok(valeur) => panic!("expected NoAttempt, got Ok({valeur:?})"),
+                Err(autre) => panic!("expected NoAttempt, got {autre:?}"),
+            };
+            if configure.is_nan() {
+                assert!(
+                    attempts.is_nan(),
+                    "NaN in, NaN expected out, got {attempts}"
+                );
+            } else {
+                assert_eq!(
+                    attempts, configure,
+                    "the payload must carry the configured value through"
+                );
+            }
         }
     }
 

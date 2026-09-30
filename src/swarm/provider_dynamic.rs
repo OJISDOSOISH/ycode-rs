@@ -1066,7 +1066,9 @@ mod tests {
 
     #[test]
     fn seul_un_prefixe_exact_de_create_qualifie_un_export() {
-        let qualifie = |noms: &[String]| premier_export(noms);
+        fn qualifie(noms: &[String]) -> Option<&str> {
+            premier_export(noms)
+        }
         assert_eq!(qualifie(&["create".to_string()]), Some("create"));
         assert_eq!(qualifie(&["createOpenAI".to_string()]), Some("createOpenAI"));
         assert_eq!(qualifie(&["default".to_string(), "createX".to_string()]), Some("createX"));

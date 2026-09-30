@@ -281,7 +281,7 @@ mod tests {
     ///
     /// C est un item de fonction, pas une closure : sa signature est concrete,
     /// donc aucune inference de type n est necessaire a l appel de [`charger`].
-    fn lecture_qui_echoue(_dir: &str) -> Result<ConfigPlat, &str> {
+    fn lecture_qui_echoue(_dir: &str) -> Result<ConfigPlat, &'static str> {
         Err(".npmrc illisible")
     }
 

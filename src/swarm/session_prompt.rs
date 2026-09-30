@@ -37,8 +37,8 @@
 //!
 //! - `crate::schema::session_message::Prompt` et `::FileAttachment` existent
 //!   aussi, mais ce sont d'AUTRES contrats : `Prompt { text, files:
-//!   Vec<FileAttachment>, agents: Vec<String> }` avec `FileAttachment { path,
-//!   mime? }`. Aucun des deux n'a de champ `uri`, `source`, ni de
+//!   Vec<FileAttachment>, agents: Vec<String> }` avec `FileAttachment { uri,
+//!   mime, name?, description? }`. Aucun des deux n'a de champ `source`, ni de
 //!   `Vec<AgentAttachment>`. Importer les aurait produit un fichier qui se
 //!   compile et qui echange faux.
 //! - `crate::core::session_event` definit aussi `EventSource`, avec `start` et
