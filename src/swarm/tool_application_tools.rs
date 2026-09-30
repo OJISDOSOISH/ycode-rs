@@ -13,15 +13,16 @@
 //!    `Cargo.toml`.
 //! 2. **An all-or-nothing validation barrier.** Every name is validated *before*
 //!    a single entry is written. One bad name in a 50-tool record leaves the
-//!    registry byte-identical to what it was. A naive port that inserts as it
-//!    walks would leave 49 half-registered tools behind.
-//! 3. **A replayable state machine, not a map.** `State.create` does not mutate
-//!    state. `state.transform` appends a *replayable* transform to a list, and
-//!    every read re-derives the state from `initial()` by replaying the whole
-//!    list in registration order. Disposing a transform therefore does not
-//!    "undo" its writes; it removes them from the replay and the state is rebuilt
-//!    from scratch. The observable difference is real: disposing a *superseded*
-//!    transform brings the *earlier* entry back, with the earlier identity.
+//!    registry exactly as it was. A naive port that inserts as it walks would
+//!    leave 49 half-registered tools behind.
+//! 3. **A replayable state machine, not a plain write.** `State.create` does not
+//!    mutate state. `state.transform` appends a *replayable* transform to a
+//!    list, and every read re-derives the state from `initial()` by replaying
+//!    the whole list in registration order. Two `register` calls therefore
+//!    accumulate: the second one does not overwrite the first, it is appended to
+//!    the replay. Nothing takes a transform back out, because `Interface`
+//!    declares only `register` and `entries`, so in this port the replay list
+//!    only grows and no name is ever removed.
 //! 4. **A fresh `identity: {}` object per registration.** Each call to
 //!    `register` mints one new opaque object per tool name. Re-registering a
 //!    name therefore replaces the identity, and the two registrations can be
@@ -43,12 +44,12 @@
 //!   scan rather than a `BTreeMap`. `Vec` linear lookup is O(n) on a registry of
 //!   a few dozen tools; correctness of the ordering was judged more important
 //!   than asymptotics for a list that short.
-//! - **`Scope` becomes an explicit [`Registration`] handle.** `register`
-//!   registers a transform whose lifetime is the enclosing `Scope`, and the
-//!   transform is released by a scope finalizer that the source never writes by
-//!   hand. Rust has no scope finalizer here, so `register` returns the handle
-//!   and [`Service::dispose`] releases it. Dropping the handle does *not*
-//!   dispose: a dropped Rust value is not a closed Effect scope.
+//! - **`Scope.Scope` becomes the `&mut self` borrow.** `register` returns
+//!   `Effect<void, Tool.RegistrationError, Scope.Scope>` in the source, so the
+//!   transform it records lives as long as the scope that opened it. Here that
+//!   lifetime is the exclusive borrow of the service: the caller opens and
+//!   closes, and [`Interface::register`] returns the `()` of the source's
+//!   `Effect<void, ...>` rather than a handle to anything.
 //! - **`layer` has no name of its own.** `Layer.effect(Service, ...)` in Effect
 //!   takes the service as its key, so the layer is literally identified by the
 //!   service. [`LAYER_NAME`] is therefore the service tag, and it is an invented
@@ -57,17 +58,16 @@
 //!
 //! # What is NOT here, and why
 //!
-//! - **No JSON boundary exists in this source.** Nothing is serialised, no
-//!   `Schema` is declared, and there is not a single optional field. The
-//!   `Schema.optional` contradiction that currently splits this batch therefore
-//!   does **not** arise in this file at all.
-//!
-//!   [`Snapshot`] is added anyway, because the porting rules require a
-//!   round-trip test and a snake_case rejection test. It is a **transcription of
-//!   the source's data shapes** (`Data = { entries: Map<string, Entry> }`,
-//!   `Entry = { identity, tool }`) and nothing more. Read the warnings on
-//!   [`Snapshot`], [`Identity`] and [`ToolRef`]: three of the JSON details there
-//!   are port decisions, not source facts.
+//! - **No JSON boundary exists in this source, so none exists here.** Nothing is
+//!   serialised, no `Schema` is declared, and there is not a single optional
+//!   field. The `Schema.optional` contradiction that currently splits this batch
+//!   therefore does **not** arise in this file at all. The two data shapes the
+//!   source declares, `Data = { readonly entries: Map<string, Entry> }` and
+//!   `Entry = { readonly identity: object, readonly tool: Tool.AnyTool }`, are
+//!   carried as live Rust values: [`Service`] holds the registry and
+//!   [`Interface::entries`] hands out the live [`Entries`], exactly as
+//!   `entries: () => state.get().entries` does. There is no second copy of the
+//!   registry, and no way to read one, because the source has no such operator.
 //!
 //! - **`export * as ApplicationTools from "./application-tools"` (line 1) is a
 //!   self re-export of the module namespace onto itself.** It is dead code.
@@ -87,9 +87,7 @@
 //!   fabrication: the `Unsafe` semaphore in the source is deliberately
 //!   unsynchronised and belongs to a single runtime.
 
-use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::fmt;
 
 pub use crate::swarm::tool_tools::{AnyTool, RegistrationError};
 use crate::swarm::effect_app_node::{make_global_node, MakeInput};
@@ -121,60 +119,37 @@ pub const MAX_NAME_LENGTH: usize = 64;
 /// registrations of the same tool name can be told apart. It is modelled here as
 /// a monotonically increasing counter, which reproduces the one observable
 /// property of `{}`: no two identities are ever equal.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+///
+/// It is deliberately not serialisable. The source object has no JSON form, so
+/// there is nothing to write, and nothing in this file crosses a serialisation
+/// boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Identity(u64);
 
 impl Identity {
     /// The numeric value behind this identity. Useful for diagnostics and for
-    /// asserting that a rebuild preserved an identity.
+    /// asserting that two registrations of the same name minted different
+    /// identities.
     pub fn value(self) -> u64 {
         self.0
-    }
-}
-
-/// A tool as seen by this registry.
-///
-/// `Tool.AnyTool` is `Definition<any, any>`: a frozen empty object whose input
-/// and output types exist only as phantom parameters. The sibling module
-/// `tool_tools.rs` models it as a unit struct, and this file re-uses it rather
-/// than declaring a second, incompatible `AnyTool`.
-///
-/// The wrapper exists only to give `tool` a JSON form. `Object.freeze({})`
-/// serialises to `{}`, so that is what [`ToolRef`] writes and the only thing it
-/// accepts on the way back in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct ToolRef(pub AnyTool);
-
-impl Serialize for ToolRef {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serde::Serialize::serialize(&serde_json::Value::Object(serde_json::Map::new()), serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for ToolRef {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        match serde_json::Value::deserialize(deserializer)? {
-            serde_json::Value::Object(map) if map.is_empty() => Ok(ToolRef(AnyTool)),
-            other => Err(<D::Error as serde::de::Error>::custom(format!(
-                "a tool is a frozen empty object, got {}",
-                other
-            ))),
-        }
     }
 }
 
 /// One registered tool: the tool itself plus the identity of its registration.
 ///
 /// Both field names come verbatim from `export interface Entry`. They are
-/// lowercase single words, so there is no camelCase hazard here. That is a fact
-/// about this file, not a generalisation: the trap exists in the family, not in
-/// this member of it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// lowercase single words, so there is no camelCase hazard here and no rename is
+/// needed: `identity` and `tool` are the names in the source and in this struct.
+/// That is a fact about this file, not a generalisation: the trap exists in the
+/// family, not in this member of it.
+///
+/// `tool` is [`AnyTool`] as it stands. `Object.freeze({})` has no fields, and the
+/// sibling module `tool_tools.rs` already models it as a unit struct, so this
+/// file stores that value directly rather than wrapping it in a second type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Entry {
-    #[serde(rename = "identity")]
     identity: Identity,
-    #[serde(rename = "tool")]
-    tool: ToolRef,
+    tool: AnyTool,
 }
 
 impl Entry {
@@ -185,7 +160,7 @@ impl Entry {
 
     /// The registered tool.
     pub fn tool(&self) -> AnyTool {
-        self.tool.0
+        self.tool
     }
 }
 
@@ -235,25 +210,9 @@ impl Entries {
     }
 }
 
-/// Handle to one registered transform.
-///
-/// Returned by [`Service::register`]. Dropping it changes nothing, exactly as a
-/// closed Effect `Scope` is not implied by letting a value go out of scope.
-/// Call [`Service::dispose`] to release it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Registration(u64);
-
-impl Registration {
-    /// Internal identifier of the transform this handle releases.
-    pub fn id(self) -> u64 {
-        self.0
-    }
-}
-
 /// The transform list, as stored by the replay model.
 #[derive(Debug, Clone)]
 struct Transform {
-    id: u64,
     entries: Vec<(String, Entry)>,
 }
 
@@ -261,11 +220,12 @@ struct Transform {
 pub trait Interface {
     /// Registers a catalog of tools.
     ///
-    /// Returns `Ok(None)` when the catalog is empty, mirroring the source's
-    /// early `if (entries.length === 0) return`: an empty record registers no
-    /// transform at all, so there is nothing to release later.
-    fn register(&mut self, tools: &BTreeMap<String, AnyTool>)
-        -> Result<Option<Registration>, RegistrationError>;
+    /// Returns `Ok(())` without touching the state when the catalog is empty,
+    /// mirroring the source's early `if (entries.length === 0) return`: an empty
+    /// record writes nothing at all. The `()` is the source's
+    /// `Effect<void, Tool.RegistrationError, Scope.Scope>`; the scope is the
+    /// `&mut self` borrow.
+    fn register(&mut self, tools: &BTreeMap<String, AnyTool>) -> Result<(), RegistrationError>;
 
     /// The currently visible entries, in insertion order.
     fn entries(&self) -> &Entries;
@@ -280,8 +240,6 @@ pub struct Service {
     transforms: Vec<Transform>,
     /// Materialised state, always rebuilt by replaying `transforms`.
     state: Entries,
-    /// Source of transform identities.
-    next_transform_id: u64,
     /// Source of entry identities. Starts at 1 so that 0 can mean "none".
     next_identity: u64,
 }
@@ -290,11 +248,11 @@ impl Interface for Service {
     fn register(
         &mut self,
         tools: &BTreeMap<String, AnyTool>,
-    ) -> Result<Option<Registration>, RegistrationError> {
+    ) -> Result<(), RegistrationError> {
         // `if (entries.length === 0) return` - before any validation, and
-        // without creating a transform.
+        // without appending a transform.
         if tools.is_empty() {
-            return Ok(None);
+            return Ok(());
         }
 
         // The validation barrier. Every name is checked before anything is
@@ -303,20 +261,17 @@ impl Interface for Service {
             validate_name(name)?;
         }
 
-        let id = self.next_transform_id;
-        self.next_transform_id += 1;
-
         // `{ identity: {}, tool }` - one fresh object per name, per call.
         let mut entries = Vec::with_capacity(tools.len());
         for (name, tool) in tools {
             self.next_identity += 1;
-            let entry = Entry { identity: Identity(self.next_identity), tool: ToolRef(*tool) };
+            let entry = Entry { identity: Identity(self.next_identity), tool: *tool };
             entries.push((name.clone(), entry));
         }
 
-        self.transforms.push(Transform { id, entries });
+        self.transforms.push(Transform { entries });
         self.materialize();
-        Ok(Some(Registration(id)))
+        Ok(())
     }
 
     fn entries(&self) -> &Entries {
@@ -330,31 +285,11 @@ impl Service {
         Self::default()
     }
 
-    /// Releases the transform behind `registration` and rebuilds the state.
-    ///
-    /// Idempotent: a handle that is already released, or was never issued,
-    /// leaves the state alone and does **not** trigger a rebuild. That mirrors
-    /// `if (!active) return Effect.void` in the dispose finalizer of `state.ts`.
-    pub fn dispose(&mut self, registration: Registration) {
-        let before = self.transforms.len();
-        self.transforms.retain(|transform| transform.id != registration.id);
-        if self.transforms.len() == before {
-            return;
-        }
-        self.materialize();
-    }
-
-    /// Number of live transforms. Exposed because the replay list, not the map,
-    /// is the real state of this service.
-    pub fn live_transforms(&self) -> usize {
-        self.transforms.len()
-    }
-
-    /// Rebuilds the state from `initial()` by replaying every live transform.
+    /// Rebuilds the state from `initial()` by replaying every recorded transform.
     ///
     /// This is `materialize` in `state.ts`. It starts from an empty registry,
-    /// not from the previous state: that is why disposing a transform can bring
-    /// an earlier entry back instead of merely deleting a key.
+    /// not from the previous state, which is what makes the replay order the
+    /// authority on what is visible.
     fn materialize(&mut self) {
         let mut next = Entries::default();
         for transform in &self.transforms {
@@ -363,11 +298,6 @@ impl Service {
             }
         }
         self.state = next;
-    }
-
-    /// The registry as a [`Snapshot`], ready to be written as JSON.
-    pub fn snapshot(&self) -> Snapshot {
-        Snapshot { entries: EntriesMap(self.state.clone()) }
     }
 }
 
@@ -425,105 +355,6 @@ pub fn node() -> AppNode {
     make_global_node(MakeInput::service(SERVICE_TAG, LayerRef::new(LAYER_NAME)))
 }
 
-// ---------------------------------------------------------------------------
-// JSON projection. NOT part of the source: see the module header.
-// ---------------------------------------------------------------------------
-
-/// The `entries` field of [`Snapshot`], serialised as a JSON object.
-///
-/// `Map<string, Entry>` is an object in JSON. Order is preserved on the way out
-/// because `serde_json` writes map entries in the order they are collected. Note
-/// that a round trip through [`serde_json::Value`] and back does **not**
-/// preserve it, because `serde_json::Value` stores objects in a `BTreeMap`
-/// unless its `preserve_order` feature is enabled. `Cargo.toml` does not enable
-/// it, so this is a real, current caveat and not a hypothetical one.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct EntriesMap(Entries);
-
-impl Serialize for EntriesMap {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeMap;
-        let mut map = serializer.serialize_map(Some(self.0.len()))?;
-        for (name, entry) in self.0.iter() {
-            map.serialize_entry(name, entry)?;
-        }
-        map.end()
-    }
-}
-
-impl<'de> Deserialize<'de> for EntriesMap {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct EntriesVisitor;
-
-        impl<'de> serde::de::Visitor<'de> for EntriesVisitor {
-            type Value = EntriesMap;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                formatter.write_str("a map from tool name to entry")
-            }
-
-            fn visit_map<A>(self, mut access: A) -> Result<Self::Value, A::Error>
-            where
-                A: serde::de::MapAccess<'de>,
-            {
-                let mut entries = Entries::default();
-                while let Some((name, entry)) = access.next_entry::<String, Entry>()? {
-                    // Duplicate keys collapse the way `Map.set` collapses them.
-                    entries.set(&name, entry);
-                }
-                Ok(EntriesMap(entries))
-            }
-        }
-
-        deserializer.deserialize_map(EntriesVisitor)
-    }
-}
-
-/// The JSON form of a registry.
-///
-/// **This type is not in the source.** It is a transcription of the source's two
-/// data shapes, `Data = { readonly entries: Map<string, Entry> }` and
-/// `Entry = { readonly identity: object, readonly tool: Tool.AnyTool }`, kept
-/// only so that the field names can be locked by a test in both directions.
-///
-/// Three details are port decisions, not source facts:
-///
-/// - `identity` is written as a JSON **number**. In the source it is an opaque
-///   object with no JSON form at all; the number is the cheapest faithful
-///   stand-in for "a value that is never equal to another".
-/// - `tool` is written as `{}`, which *is* faithful: `AnyTool` is
-///   `Object.freeze({})`.
-/// - Unknown keys are ignored, not rejected, matching `Schema.Class`. A wrong
-///   key therefore fails by being *missing*, not by being extra. The rejection
-///   test relies on that.
-///
-/// `data` and `entries` carry the same lowercase name as the source. There is no
-/// camelCase field in this source, so the familiar `projectID` / `project_id`
-/// hazard has no target here.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Snapshot {
-    /// The registry, keyed by tool name.
-    #[serde(rename = "entries")]
-    pub entries: EntriesMap,
-}
-
-impl Snapshot {
-    /// Parses a snapshot from JSON text.
-    pub fn from_json_str(text: &str) -> Result<Self, serde_json::Error> {
-        serde_json::from_str(text)
-    }
-
-    /// Renders the snapshot as compact JSON text.
-    pub fn to_json_string(&self) -> String {
-        serde_json::to_string(self).expect("a Snapshot is always serialisable")
-    }
-
-    /// The entries carried by this snapshot, in insertion order.
-    pub fn into_entries(self) -> Entries {
-        self.entries.0
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -540,6 +371,12 @@ mod tests {
         let first = names.next().expect("one entry expected").to_string();
         assert!(names.next().is_none(), "exactly one entry expected");
         first
+    }
+
+    /// Every visible name with the identity it carries, so that "nothing was
+    /// written" can be asserted on the live registry rather than on a copy.
+    fn visible(entries: &Entries) -> Vec<(String, u64)> {
+        entries.iter().map(|(name, entry)| (name.to_string(), entry.identity().value())).collect()
     }
 
     // --- identity of the service -------------------------------------------
@@ -605,27 +442,27 @@ mod tests {
     #[test]
     fn validate_name_is_the_only_thing_that_makes_a_name_invalid() {
         // The empty catalog does not run validation at all, which is the early
-        // return, not a lax regex.
+        // return, not a lax regex: a catalog of the same kind that is not empty
+        // is refused.
         let mut service = Service::new();
-        assert_eq!(service.register(&BTreeMap::new()).unwrap(), None);
-        assert_eq!(service.live_transforms(), 0);
+        assert!(service.register(&BTreeMap::new()).is_ok());
+        assert!(service.entries().is_empty());
+        assert!(service.register(&catalog(&["1bad"])).is_err());
     }
 
     // --- registration ------------------------------------------------------
 
     #[test]
-    fn an_empty_record_registers_no_transform_and_returns_no_handle() {
+    fn an_empty_record_writes_nothing_and_succeeds() {
         let mut service = Service::new();
-        assert_eq!(service.register(&BTreeMap::new()), Ok(None));
+        assert!(service.register(&BTreeMap::new()).is_ok());
         assert!(service.entries().is_empty());
-        assert_eq!(service.live_transforms(), 0);
     }
 
     #[test]
     fn a_single_tool_is_registered_under_the_name_it_was_given() {
         let mut service = Service::new();
-        let handle = service.register(&catalog(&["read"])).expect("valid name");
-        assert!(handle.is_some());
+        service.register(&catalog(&["read"])).expect("valid name");
         assert_eq!(service.entries().len(), 1);
         assert_eq!(only_name(service.entries()), "read");
         assert!(service.entries().get("read").is_some());
@@ -637,7 +474,7 @@ mod tests {
         // inserted as it walked would leave `read` registered.
         let mut service = Service::new();
         service.register(&catalog(&["write"])).expect("valid name");
-        let before = service.snapshot();
+        let before = visible(service.entries());
 
         let error = service
             .register(&catalog(&["read", "1bad"]))
@@ -645,8 +482,7 @@ mod tests {
         assert_eq!(error.name, "1bad");
         assert_eq!(error.message, "Invalid tool name: 1bad");
 
-        assert_eq!(service.snapshot(), before);
-        assert_eq!(service.live_transforms(), 1);
+        assert_eq!(visible(service.entries()), before, "the registry must be unchanged");
     }
 
     #[test]
@@ -721,87 +557,13 @@ mod tests {
         assert_eq!(error.name, "aaa!", "alphabetical, not insertion order");
     }
 
-    // --- dispose and the replay model --------------------------------------
-
-    #[test]
-    fn disposing_the_only_registration_empties_the_registry() {
-        let mut service = Service::new();
-        let handle = service.register(&catalog(&["read"])).expect("valid").unwrap();
-        service.dispose(handle);
-        assert!(service.entries().is_empty());
-        assert_eq!(service.live_transforms(), 0);
-    }
-
-    #[test]
-    fn disposing_one_registration_among_several_keeps_the_others() {
-        let mut service = Service::new();
-        let first = service.register(&catalog(&["read"])).expect("valid").unwrap();
-        service.register(&catalog(&["write"])).expect("valid");
-        service.dispose(first);
-        assert_eq!(service.entries().len(), 1);
-        assert_eq!(only_name(service.entries()), "write");
-    }
-
-    #[test]
-    fn disposing_a_superseded_registration_brings_the_earlier_entry_back() {
-        // This is the observable difference between a replay model and a plain
-        // map. The second registration overwrote `read`; disposing the second
-        // one does not leave `read` missing, it restores the first one, with the
-        // first one's identity.
-        let mut service = Service::new();
-        service.register(&catalog(&["read"])).expect("valid");
-        let first_identity = service.entries().get("read").unwrap().identity();
-        let superseded = service.register(&catalog(&["read"])).expect("valid").unwrap();
-        let second_identity = service.entries().get("read").unwrap().identity();
-        assert_ne!(first_identity, second_identity);
-
-        service.dispose(superseded);
-        let restored = service.entries().get("read").expect("the earlier entry is back");
-        assert_eq!(restored.identity(), first_identity, "identity of the surviving transform");
-        assert_eq!(service.entries().len(), 1);
-    }
-
-    #[test]
-    fn disposing_twice_is_a_no_op_and_does_not_rebuild_the_state() {
-        // The source guards with `if (!active) return Effect.void`: the second
-        // dispose does not even rematerialise. Observable here because a later
-        // registration would be rebuilt away if the stale handle were honoured.
-        let mut service = Service::new();
-        let stale = service.register(&catalog(&["read"])).expect("valid").unwrap();
-        service.dispose(stale);
-        service.register(&catalog(&["write"])).expect("valid");
-        assert_eq!(only_name(service.entries()), "write");
-
-        service.dispose(stale);
-        assert_eq!(only_name(service.entries()), "write", "state must not be rebuilt");
-        assert_eq!(service.live_transforms(), 1);
-    }
-
-    #[test]
-    fn disposing_a_handle_that_was_never_issued_changes_nothing() {
-        let mut service = Service::new();
-        service.register(&catalog(&["read"])).expect("valid");
-        service.dispose(Registration(9999));
-        assert_eq!(service.entries().len(), 1);
-    }
-
-    #[test]
-    fn dropping_a_handle_does_not_release_the_transform() {
-        // A dropped Rust value is not a closed Effect scope.
-        let mut service = Service::new();
-        drop(service.register(&catalog(&["read"])).expect("valid"));
-        assert_eq!(service.entries().len(), 1);
-        assert_eq!(service.live_transforms(), 1);
-    }
-
     // --- the service is usable through its contract only -------------------
 
     #[test]
     fn the_service_is_usable_through_a_trait_object() {
         let mut service: Box<dyn Interface> = Box::new(Service::new());
-        assert_eq!(service.register(&BTreeMap::new()), Ok(None));
-        let handle = service.register(&catalog(&["glob"])).expect("valid");
-        assert!(handle.is_some());
+        assert!(service.register(&BTreeMap::new()).is_ok());
+        assert!(service.register(&catalog(&["glob"])).is_ok());
         assert_eq!(service.entries().len(), 1);
     }
 
@@ -817,126 +579,6 @@ mod tests {
             second.entries().get("a").unwrap().identity(),
             "both are the first identity either service ever minted"
         );
-    }
-
-    // --- JSON projection: exact field names, both directions ---------------
-
-    #[test]
-    fn the_snapshot_serialises_with_the_exact_field_names_of_the_source() {
-        // Trap 1, write direction. The keys are `entries`, `identity`, `tool`,
-        // verbatim from `Data` and `Entry`. If any of them were renamed to
-        // snake_case or PascalCase here, this string comparison fails.
-        let mut service = Service::new();
-        service.register(&catalog(&["read"])).expect("valid");
-        let json = service.snapshot().to_json_string();
-        assert_eq!(
-            json,
-            r#"{"entries":{"read":{"identity":1,"tool":{}}}}"#,
-            "the JSON form must be exactly the source field names"
-        );
-    }
-
-    #[test]
-    fn the_snapshot_preserves_registration_order_in_the_serialised_text() {
-        let mut service = Service::new();
-        service.register(&catalog(&["zeta"])).expect("valid");
-        service.register(&catalog(&["alpha"])).expect("valid");
-        let json = service.snapshot().to_json_string();
-        let zeta = json.find("zeta").expect("zeta present");
-        let alpha = json.find("alpha").expect("alpha present");
-        assert!(zeta < alpha, "insertion order, not alphabetical: {}", json);
-    }
-
-    #[test]
-    fn the_snapshot_round_trips_and_keeps_identities() {
-        let mut service = Service::new();
-        service.register(&catalog(&["read", "write"])).expect("valid");
-        let original = service.snapshot();
-        let parsed = Snapshot::from_json_str(&original.to_json_string()).expect("round trip");
-        assert_eq!(parsed, original);
-        assert_eq!(
-            parsed.entries.0.get("read").unwrap().identity(),
-            service.entries().get("read").unwrap().identity()
-        );
-    }
-
-    #[test]
-    fn the_snapshot_rejects_snake_case_and_wrong_case_field_names_on_read() {
-        // Trap 1, read direction. Each of these must FAIL, and each must fail
-        // because the correctly cased key is *missing*, which is why unknown
-        // keys are tolerated the way `Schema.Class` tolerates them.
-        let refused = [
-            r#"{"Entries":{"read":{"identity":1,"tool":{}}}}"#,   // capital E
-            r#"{"entries":{"read":{"Identity":1,"tool":{}}}}"#,   // capital I
-            r#"{"entries":{"read":{"identity":1,"Tool":{}}}}"#,   // capital T
-            r#"{"entries":{"Read":{"identity":1,"tool":{}}}}"#,   // capital R on the tool key
-            r#"{"entries":{"read":{"tool":{}}}}"#,                // identity missing
-            r#"{"entries":{"read":{"identity":1}}}"#,             // tool missing
-            r#"{"entries":{"read":{"identity":1,"tool":null}}}"#, // explicit null tool
-        ];
-        for text in refused {
-            assert!(Snapshot::from_json_str(text).is_err(), "{} should be refused", text);
-        }
-    }
-
-    #[test]
-    fn an_unknown_key_is_ignored_rather_than_refused_which_is_what_the_source_does() {
-        // The counterpart of the test above, and the reason it works. Extra
-        // fields are ignored, so a wrongly cased key is only ever caught by
-        // being absent. This is `Schema.Class` behaviour, not serde default.
-        let text = r#"{"entries":{"read":{"identity":1,"tool":{}}},"extra":true}"#;
-        let snapshot = Snapshot::from_json_str(text).expect("extra keys are ignored");
-        assert_eq!(snapshot.entries.0.len(), 1);
-        assert_eq!(snapshot.entries.0.get("read").unwrap().identity(), Identity(1));
-    }
-
-    #[test]
-    fn the_snapshot_rejects_a_tool_that_is_not_a_frozen_empty_object() {
-        // `AnyTool` is `Object.freeze({})`, so `{}` is the only valid JSON.
-        for text in [
-            r#"{"entries":{"read":{"identity":1,"tool":{"name":"read"}}}}"#,
-            r#"{"entries":{"read":{"identity":1,"tool":[]}}}"#,
-            r#"{"entries":{"read":{"identity":1,"tool":""}}}"#,
-            r#"{"entries":{"read":{"identity":1,"tool":0}}}"#,
-        ] {
-            assert!(Snapshot::from_json_str(text).is_err(), "{} should be refused", text);
-        }
-    }
-
-    #[test]
-    fn a_snapshot_round_trip_rebuilds_an_identical_registry() {
-        let mut service = Service::new();
-        service.register(&catalog(&["read"])).expect("valid");
-        service.register(&catalog(&["read", "write"])).expect("valid");
-        let snapshot = service.snapshot();
-        let rebuilt = Snapshot::from_json_str(&snapshot.to_json_string()).expect("round trip");
-        assert_eq!(rebuilt.entries, snapshot.entries);
-        assert_eq!(rebuilt.into_entries().names().collect::<Vec<&str>>(), vec!["read", "write"]);
-    }
-
-    #[test]
-    fn a_duplicate_key_in_the_json_collapses_the_way_a_map_set_does() {
-        let text = r#"{"entries":{"read":{"identity":1,"tool":{}},"read":{"identity":2,"tool":{}}}}"#;
-        let snapshot = Snapshot::from_json_str(text).expect("parses");
-        let entries = snapshot.into_entries();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries.get("read").unwrap().identity(), Identity(2));
-    }
-
-    // --- registration handles ---------------------------------------------
-
-    #[test]
-    fn registration_handles_are_distinct_per_call() {
-        let mut service = Service::new();
-        let first = service.register(&catalog(&["read"])).expect("valid").unwrap();
-        let second = service.register(&catalog(&["read"])).expect("valid").unwrap();
-        assert_ne!(first, second);
-        assert_ne!(first.id(), second.id());
-        // The transform counter starts at 0 and does NOT share its sequence with
-        // the entry identity counter, which starts at 1.
-        assert_eq!(first.id(), 0);
-        assert_eq!(second.id(), 1);
-        assert_eq!(service.entries().get("read").unwrap().identity().value(), 2);
     }
 
     #[test]
