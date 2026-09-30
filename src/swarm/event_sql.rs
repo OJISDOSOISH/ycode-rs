@@ -597,7 +597,7 @@ mod tests {
     }
 
     #[test]
-    fn la_table_de_sequencement_expose_ses_trois_colonnes_dans_leur_ordre_de_declaration() {
+    fn the_sequence_table_exposes_its_three_columns_in_declaration_order() {
         assert_eq!(
             TABLE_EVENT_SEQUENCE.noms_de_colonnes(),
             vec!["aggregate_id", "seq", "owner_id"]
@@ -605,7 +605,7 @@ mod tests {
     }
 
     #[test]
-    fn la_table_event_expose_ses_cinq_colonnes_dans_leur_ordre_de_declaration() {
+    fn the_event_table_exposes_its_five_columns_in_declaration_order() {
         assert_eq!(
             TABLE_EVENT.noms_de_colonnes(),
             vec!["id", "aggregate_id", "seq", "type", "data"]
@@ -613,7 +613,7 @@ mod tests {
     }
 
     #[test]
-    fn la_cle_primaire_de_l_evenement_est_son_identifiant_et_celle_du_sequencement_est_son_agregat() {
+    fn the_event_primary_key_is_its_id_and_the_sequence_primary_key_is_its_aggregate_id() {
         assert!(TABLE_EVENT.colonne("id").expect("colonne id").primary_key);
         assert!(TABLE_EVENT_SEQUENCE
             .colonne("aggregate_id")
@@ -631,7 +631,7 @@ mod tests {
     }
 
     #[test]
-    fn une_colonne_absente_d_une_table_renvoie_rien() {
+    fn a_column_missing_from_a_table_returns_nothing() {
         assert!(TABLE_EVENT.colonne("inconnue").is_none());
         // Le nom de colonne existe dans l autre table, mais pas dans celle-ci.
         assert!(TABLE_EVENT.colonne("owner_id").is_none());
@@ -640,7 +640,7 @@ mod tests {
     }
 
     #[test]
-    fn la_seule_colonne_sans_not_null_ecrit_dans_l_evenement_est_son_identifiant() {
+    fn the_only_event_column_without_a_declared_not_null_is_its_id() {
         // Point tranche : `text().$type<EventV2.ID>().primaryKey()` n ecrit pas
         // `notNull()`, donc la colonne est declaree nullable, meme si elle est
         // la cle primaire.
@@ -655,7 +655,7 @@ mod tests {
     }
 
     #[test]
-    fn la_seule_colonne_sans_not_null_ecrit_dans_le_sequencement_est_son_proprietaire() {
+    fn the_only_sequence_column_without_a_declared_not_null_is_its_owner_id() {
         assert_eq!(
             TABLE_EVENT_SEQUENCE.colonnes_sans_not_null_declares(),
             vec!["owner_id"]
@@ -667,7 +667,7 @@ mod tests {
     }
 
     #[test]
-    fn la_cle_primaire_admet_null_a_la_base_meme_quand_la_source_l_interdit() {
+    fn a_primary_key_admits_null_in_the_database_even_when_the_source_forbids_it() {
         // Les deux etats opposes de la source : `id` n ecrit pas `notNull()`,
         // `aggregate_id` l ecrit. Les deux colonnes sont des cles primaires, et
         // les deux peuvent physiquement valoir `NULL`, parce que le DDL genere
@@ -691,7 +691,7 @@ mod tests {
     }
 
     #[test]
-    fn les_colonnes_admettant_null_a_la_base_sont_plus_nombreuses_que_cellules_sans_not_null_ecrit() {
+    fn the_columns_admitting_null_in_the_database_outnumber_those_without_a_declared_not_null() {
         // Sur `event`, `id` est dans les deux listes, mais pas pour la meme
         // raison : une fois parce que la source ne l interdit pas, une fois
         // parce que c est une cle primaire.
@@ -708,7 +708,7 @@ mod tests {
     }
 
     #[test]
-    fn la_colonne_data_est_la_seule_colonne_json_et_les_autres_sont_du_texte_ou_de_l_entier() {
+    fn the_data_column_is_the_only_json_column_and_the_others_are_text_or_integer() {
         let json: Vec<&str> = TABLE_EVENT
             .columns
             .iter()
@@ -737,7 +737,7 @@ mod tests {
     }
 
     #[test]
-    fn la_cible_de_la_cle_etrangere_est_l_agregat_du_sequencement_et_la_suppression_part_en_cascade() {
+    fn the_foreign_key_targets_the_sequence_aggregate_id_and_deletion_cascades() {
         let cle = TABLE_EVENT
             .colonne("aggregate_id")
             .expect("colonne aggregate_id")
@@ -760,7 +760,7 @@ mod tests {
     }
 
     #[test]
-    fn les_deux_index_ne_portent_pas_sur_les_memes_colonnes_et_l_unique_est_le_premier() {
+    fn the_two_indexes_cover_different_columns_and_the_unique_one_is_first() {
         // Les colonnes sont comparees comme tranches, avec `[..]` : la colonne
         // du portage est un `&[&str]`, et la comparaison se fait donc sur un
         // type identique des deux cotes.
@@ -785,7 +785,7 @@ mod tests {
     }
 
     #[test]
-    fn chaque_index_ne_cible_que_des_colonnes_qui_existent_dans_la_table_event() {
+    fn each_index_only_targets_columns_that_exist_in_the_event_table() {
         for index in EVENT_INDEXES.iter() {
             for &nom in index.columns {
                 assert!(
@@ -799,7 +799,7 @@ mod tests {
     }
 
     #[test]
-    fn l_index_unique_interdit_deux_evenements_de_meme_agregat_et_de_meme_numero() {
+    fn the_unique_index_forbids_two_events_with_the_same_aggregate_id_and_seq() {
         let evenements = vec![evenement("ses_1", 1), evenement("ses_1", 1)];
         assert_eq!(
             conflits_de_sequence(&evenements),
@@ -808,7 +808,7 @@ mod tests {
     }
 
     #[test]
-    fn un_meme_numero_dans_deux_agregats_differents_ne_entre_pas_en_conflit() {
+    fn the_same_seq_in_two_different_aggregates_is_not_a_conflict() {
         // Meme `seq`, deux `aggregate_id` : le couple est different, donc
         // l index unique est respecte.
         let evenements = vec![evenement("ses_1", 1), evenement("ses_2", 1)];
@@ -816,13 +816,13 @@ mod tests {
     }
 
     #[test]
-    fn des_numeros_differents_dans_le_meme_agregat_ne_rientrent_pas_en_conflit() {
+    fn different_seqs_in_the_same_aggregate_are_not_a_conflict() {
         let evenements = vec![evenement("ses_1", 1), evenement("ses_1", 2)];
         assert!(conflits_de_sequence(&evenements).is_empty());
     }
 
     #[test]
-    fn les_conflits_sont_tries_et_ne_sont_comptes_qu_une_seule_fois() {
+    fn conflicts_are_sorted_and_counted_only_once() {
         let evenements = vec![
             evenement("ses_2", 3),
             evenement("ses_1", 7),
@@ -837,7 +837,7 @@ mod tests {
     }
 
     #[test]
-    fn une_tranche_vide_ne_declenche_ni_conflit_ni_orphelin() {
+    fn an_empty_slice_triggers_neither_a_conflict_nor_an_orphan() {
         let vide: Vec<EventRow> = Vec::new();
         assert!(conflits_de_sequence(&vide).is_empty());
         assert!(positions_avec_donnee_invalide(&vide).is_empty());
@@ -845,7 +845,7 @@ mod tests {
     }
 
     #[test]
-    fn un_seul_evenement_bien_forme_ne_declenche_aucun_probleme() {
+    fn a_single_well_formed_event_triggers_no_problem() {
         let evenements = vec![evenement("ses_1", 1)];
         assert!(conflits_de_sequence(&evenements).is_empty());
         assert!(positions_avec_donnee_invalide(&evenements).is_empty());
@@ -854,14 +854,14 @@ mod tests {
     }
 
     #[test]
-    fn un_evenement_dont_l_agregat_est_absent_du_sequencement_est_signale_comme_orphelin() {
+    fn an_event_whose_aggregate_is_absent_from_the_sequence_table_is_reported_as_an_orphan() {
         let evenements = vec![evenement("ses_1", 1), evenement("ses_2", 1)];
         let sequences = vec![sequence("ses_1", 1)];
         assert_eq!(agregats_orphelins(&evenements, &sequences), vec!["ses_2".to_string()]);
     }
 
     #[test]
-    fn deux_evenements_du_meme_agregat_inconnu_ne_donnent_qu_un_seul_orphelin() {
+    fn two_events_from_the_same_unknown_aggregate_yield_only_one_orphan() {
         let evenements = vec![
             evenement("ses_9", 1),
             evenement("ses_9", 2),
@@ -874,7 +874,7 @@ mod tests {
     }
 
     #[test]
-    fn une_sequence_sans_evenement_est_lisible_mais_n_est_pas_une_erreur() {
+    fn a_sequence_without_an_event_is_reported_but_is_not_an_error() {
         // La cle etrangere va de `event` vers `event_sequence` : une table mere
         // vide reste valide, et rien ici ne doit la signaler comme un conflit.
         let sequences = vec![sequence("ses_1", 1), sequence("ses_2", 1)];
@@ -888,7 +888,7 @@ mod tests {
     }
 
     #[test]
-    fn la_suppression_d_un_agregat_emporte_tous_ses_evenements() {
+    fn deleting_an_aggregate_takes_all_of_its_events_with_it() {
         let evenements = vec![
             evenement("ses_1", 1),
             evenement("ses_1", 2),
@@ -901,14 +901,14 @@ mod tests {
     }
 
     #[test]
-    fn la_suppression_d_un_agregat_absent_ne_change_rien() {
+    fn deleting_an_absent_aggregate_changes_nothing() {
         let evenements = vec![evenement("ses_1", 1), evenement("ses_2", 1)];
         let survivants = evenements_survivants_a_la_suppression(&evenements, "ses_9");
         assert_eq!(survivants, evenements);
     }
 
     #[test]
-    fn la_suppression_du_dernier_agregat_laisse_une_liste_vide() {
+    fn deleting_the_last_aggregate_leaves_an_empty_list() {
         let evenements = vec![evenement("ses_1", 1)];
         assert!(
             evenements_survivants_a_la_suppression(&evenements, "ses_1").is_empty()
@@ -916,7 +916,7 @@ mod tests {
     }
 
     #[test]
-    fn un_objet_json_vide_est_accepte_mais_un_ou_un_tableau_sont_refuses() {
+    fn an_empty_json_object_is_accepted_but_a_boolean_or_an_array_is_rejected() {
         assert!(donnee_est_un_objet_json(&serde_json::json!({})));
         assert!(donnee_est_un_objet_json(&serde_json::json!({ "a": 1 })));
 
@@ -929,7 +929,7 @@ mod tests {
     }
 
     #[test]
-    fn la_position_de_la_ou_des_lignes_invalides_est_rendue_dans_leur_ordre() {
+    fn the_positions_of_the_invalid_rows_are_returned_in_order() {
         let mut premiere = evenement("ses_1", 1);
         premiere.data = serde_json::json!([1, 2]);
         let mut troisieme = evenement("ses_1", 3);
@@ -940,7 +940,7 @@ mod tests {
     }
 
     #[test]
-    fn une_chaine_vide_reste_valide_car_l_absence_de_valeur_est_interdite_mais_pas_la_chaine_vide() {
+    fn an_empty_string_stays_valid_because_not_null_forbids_a_missing_value_not_an_empty_string() {
         // La source ne contient aucun ternaire ni coalescent : la seule question
         // voisine est `notNull` contre chaine vide. En SQL, `not null` interdit
         // `NULL`, il n interdit pas `""`. Une ligne dont les chaines sont vides
@@ -966,7 +966,7 @@ mod tests {
     }
 
     #[test]
-    fn le_champ_type_sort_du_cote_json_sous_le_nom_type_et_pas_sous_event_type() {
+    fn the_type_field_is_serialized_under_the_name_type_and_not_under_event_type() {
         let evenement = evenement("ses_1", 1);
         let json = serde_json::to_value(&evenement).expect("serialisation");
         assert!(
@@ -985,7 +985,7 @@ mod tests {
     }
 
     #[test]
-    fn les_deux_lignes_serialisees_n_exposent_exactement_les_noms_de_leurs_colonnes() {
+    fn both_serialized_rows_expose_exactly_their_column_names() {
         // Verrou de toutes les entrees, pas seulement du champ problematic :
         // les cinq colonnes de `event` et les trois de `event_sequence`, sous
         // leur nom de colonne exact, et rien d autre.
@@ -1017,7 +1017,7 @@ mod tests {
     }
 
     #[test]
-    fn un_owner_id_absent_disparait_du_json_au_lieu_de_devenir_null() {
+    fn an_absent_owner_id_disappears_from_the_json_instead_of_becoming_null() {
         let sans_proprietaire = SequenceRow {
             aggregate_id: "ses_1".to_string(),
             seq: 3,
@@ -1032,7 +1032,7 @@ mod tests {
     }
 
     #[test]
-    fn un_owner_id_vide_survit_a_la_serialization_et_ne_devient_pas_absent() {
+    fn an_empty_owner_id_survives_serialization_and_does_not_become_absent() {
         // Le coalescent `??` teste la nullite : une chaine vide n est pas un
         // absent. Ce n est pas un ternaire, donc `skip_serializing_if` ne doit
         // pas la transformer en champ manquant.

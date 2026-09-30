@@ -93,13 +93,56 @@
 //! champ Rust dit deja, donc un renommage futur cassera la compilation plutot
 //! que l'echange avec le TypeScript. Un test dedie verifie les noms.
 //!
-//! ## Divergence connue et assumee
+//! ## Le point NON verifie : `null` dans `policies`
 //!
-//! `Schema.optional` en Effect v4 accepte une cle absente ou `undefined`, et
-//! refuse `null`. Le `Option<T>` de Serde lit `null` comme `None`. Sur du JSON
+//! Le test `null_dans_policies_est_lu_comme_une_absence_par_serde_et_la_parite_effect_reste_non_verifiee`
+//! verrouille `{"policies": null}` comme une absence. Ce qui est **certain**,
+//! c'est le comportement de Serde : `null` se decode en `None` pour un
+//! `Option`, sans qu'aucune option ne le demande. Ce qui ne l'est **pas**,
+//! c'est la parite avec Effect.
+//!
+//! L'hypothese a trancher est la suivante : `Schema.optional` n'etant pas
+//! appele avec `{ exact: true }`, il traiterait `null` comme `undefined`. Elle
+//! **n'a pas pu etre verifiee** : `exact` n'apparait avec `Schema.optional`
+//! nulle part dans le depot opencode (tous les `exact: true` trouves sont des
+//! selecteurs Playwright), et la recherche ci-dessous n'a rien tranche.
+//!
+//! - `node_modules` est absent du depot opencode, et il n'existe aucun
+//!   `node_modules` ailleurs sur la machine : aucun `Schema.decodeUnknown`
+//!   ne peut etre execute pour observer le comportement reel.
+//! - `patches/effect@4.0.0-beta.83.patch` ne touche que
+//!   `dist/unstable/httpapi/HttpApiSchema.ts`, pas `PropertySignature` : il ne
+//!   change donc rien de notre cote.
+//! - Aucun test du depot opencode ne decode un `null` contre un champ
+//!   declare `Schema.optional` : il n'y a aucun resultat observe a recopier.
+//!
+//! Deux indices **indirects et de sens opposes** ont ete trouves, et c'est
+//! precisement ce qui interdit d'arbitrer :
+//!
+//! - `packages/opencode/src/server/routes/instance/httpapi/public.ts` lignes
+//!   92 et 460 : "Effect's `Schema.optional` emits `anyOf: [T, {type:"null"}]`"
+//!   et "Strip `{type:"null"}` arms that Effect's `Schema.optional` adds".
+//!   Cela decrit la GENERATION de JSON Schema, ou l'absence est representee
+//!   par une branche `null`. Ce n'est pas le decodeur, et ca ne dit rien de ce
+//!   qu'il accepte reellement.
+//! - `packages/llm/src/protocols/shared.ts` ligne 25 definit
+//!   `optionalNull = Schema.optional(Schema.NullOr(schema))`, employe partout
+//!   ou un fournisseur envoie reellement `null`. Les auteurs n'auraient rien a
+//!   ajouter si `optional` acceptait deja `null`.
+//!
+//! Consequence a connaitre : si Effect refuse `null` sur une propriete
+//! optionnelle non exacte, alors `{"policies": null}` **est** une erreur de
+//! decodage cote TypeScript, la ou le derive Serde l'accepte ici. Sur du JSON
 //! ecrit par le TypeScript la difference est invisible ; elle ne se voit que
-//! sur une saisie manuelle. Un test la fixe explicitement pour que personne ne
-//! la prenne pour un comportement voulu.
+//! sur une saisie manuelle. Le test reste en place parce qu'il ne certifie
+//! qu'une verite qui, elle, ne depend pas d Effect : ce que fait Serde. Le
+//! jour ou la parite est etablie, le correctif tient en un `deserialize_with`
+//! qui refuse `null` sur le champ, et rien d'autre ne change.
+//!
+//! L'hypothese se propage au niveau superieur : `v1/config/config.ts` ligne 185
+//! declare `Schema.optional(Schema.mutable(Schema.Array(Policy)))`, donc
+//! `{"policies": null}` y pose exactement la meme question. Ce fichier ne
+//! porte que le niveau interne.
 
 use serde::{Deserialize, Serialize};
 
@@ -203,6 +246,12 @@ pub struct Experimental {
     /// L'ordre est significatif : `policy.ts:38` utilise `findLast`, donc
     /// c'est la derniere regle qui correspond qui gagne. Un `BTreeSet` ou un
     /// tri quelconque casserait cette semantique.
+    ///
+    /// Cote decodage, `null` se lit comme une absence : c'est le comportement
+    /// de `Option` sous Serde, et il n'a rien a voir avec une hypothese sur
+    /// Effect. La parite avec `Schema.optional` sans `exact: true`, qui
+    /// traiterait `null` comme `undefined`, **n'est pas verifiee** ; voir la
+    /// section "Le point NON verifie" du module.
     #[serde(rename = "policies", skip_serializing_if = "std::option::Option::is_none")]
     pub policies: Option<Vec<Policy>>,
 }
@@ -424,13 +473,35 @@ mod tests {
     }
 
     #[test]
-    fn une_valeur_null_est_lue_comme_absente_ce_que_le_typescript_refuse() {
-        // Divergence connue et assumee, pas un comportement voulu : en Effect v4
-        // `Schema.optional` refuse `null`, alors que `Option<T>` l'accepte.
-        // Elle ne se voit que sur une saisie manuelle du JSON.
+    fn null_dans_policies_est_lu_comme_une_absence_par_serde_et_la_parite_effect_reste_non_verifiee() {
+        // Ce que ce test prouve, c'est le comportement de Serde : `null` se
+        // decode en `None` pour un `Option`, sans qu'aucune option ne le
+        // demande. Ce qu'il ne prouve PAS, c'est la parite avec
+        // `Schema.optional` sans `exact: true`, qui traiterait `null` comme
+        // `undefined` : cette hypothese n'a pas pu etre verifiee dans le depot
+        // (node_modules absent, aucun test du depot qui decode un `null` contre
+        // un `Schema.optional`, et deux indices indirects de sens opposes).
+        // Si Effect refuse `null` ici, `{"policies": null}` est une erreur cote
+        // TS et une absence ici : c'est le seul ecart possible de ce fichier,
+        // et il est assume. Voir "Le point NON verifie" du module.
         let experimental: Experimental = serde_json::from_str("{\"policies\":null}").unwrap();
+
         assert_eq!(experimental.policies, None);
         assert!(experimental.policies.is_none());
+        // Une absence se reecrit sans la cle, jamais avec `null`.
+        assert_eq!(serde_json::to_string(&experimental).unwrap(), "{}");
+    }
+
+    #[test]
+    fn null_au_niveau_du_champ_est_une_absence_mais_null_dans_la_liste_est_refuse() {
+        // L'asymetrie que le derive introduit, et le lieu exact ou une
+        // correction devra etre appliquee : `null` a la place du champ donne
+        // `None`, `null` dans le tableau ne donne pas `Vec<Policy>`.
+        let absence: Experimental = serde_json::from_str("{\"policies\":null}").unwrap();
+        assert_eq!(absence.policies, None);
+
+        let liste: Result<Experimental, _> = serde_json::from_str("{\"policies\":[null]}");
+        assert!(liste.is_err(), "un null dans la liste ne peut pas devenir une regle");
     }
 
     #[test]

@@ -354,7 +354,7 @@ mod tests {
     /// Un objet vide est valide : les trois champs sont optionnels, et le
     /// resultat ne contient aucune cle.
     #[test]
-    fn un_entree_vide_donne_trois_metadonnees_absentes() {
+    fn an_empty_input_yields_three_absent_metadata_fields() {
         let vide = CopilotResponseInput::default();
         let metadata = get_response_metadata(&vide);
         assert_eq!(metadata, CopilotResponseMetadata::default());
@@ -368,7 +368,7 @@ mod tests {
     /// Le verrou principal : les trois cles sortent avec l'orthographe exacte
     /// de la source, dans l'ordre de l'objet litteral d'origine.
     #[test]
-    fn les_noms_json_de_sortie_sont_exactement_ceux_de_la_source() {
+    fn output_json_names_match_the_source_exactly() {
         let metadata = get_response_metadata(&CopilotResponseInput {
             id: Some("chatcmpl-1".to_string()),
             created: Some(1_700_000_000.0),
@@ -386,7 +386,7 @@ mod tests {
     /// majuscules (`sessionID`, `providerID`) : c'est cette reflexe qui ferait
     /// ecrire `modelID` ici, alors que la source ecrit `modelId`.
     #[test]
-    fn ni_snake_case_ni_majuscule_ne_peuvent_pas_sortir() {
+    fn neither_snake_case_nor_the_uppercase_id_form_escapes() {
         let metadata = get_response_metadata(&CopilotResponseInput {
             id: Some("x".to_string()),
             created: Some(0.0),
@@ -422,7 +422,7 @@ mod tests {
     /// modele de langue le transmet. `serde` seul ignorerait la cle et
     /// rendrait `None` sans rien dire, donc le parseur explicite la refuse.
     #[test]
-    fn la_forme_snake_case_est_refusee_a_la_lecture() {
+    fn the_snake_case_form_is_rejected_when_parsing() {
         for (texte, attendue) in [
             (r#"{"id":"x","model_id":"m"}"#, "model"),
             (r#"{"id":"x","modelID":"m"}"#, "model"),
@@ -448,7 +448,7 @@ mod tests {
     /// destructureur de la source, qui ne garde que les trois champs qu'il
     /// liste.
     #[test]
-    fn une_cle_etrangere_est_ignoree() {
+    fn an_unrelated_key_is_ignored() {
         let entree = parse_copilot_response_input(&json!({
             "object": "chat.completion",
             "choices": [],
@@ -466,7 +466,7 @@ mod tests {
     /// piege de veracite, et le plus evident des deux parce qu'il porte sur
     /// une chaine.
     #[test]
-    fn une_chaine_vide_survit_le_coalescent() {
+    fn an_empty_string_survives_the_coalesce() {
         let metadata = get_response_metadata(&CopilotResponseInput {
             id: Some(String::new()),
             model: Some(String::new()),
@@ -487,7 +487,7 @@ mod tests {
     /// difference entre `??` et un test de veracite, et elle se voit sur la
     /// seule entree ou ils divergent, la chaine vide.
     #[test]
-    fn les_deux_coalescents_ne_sont_pas_un_seul() {
+    fn the_two_coalesce_helpers_are_not_one() {
         assert_eq!(coalescent_nullish(Some("")), Some(String::new()));
         assert_eq!(coalescent_nullish(Some("m")), Some("m".to_string()));
         assert_eq!(coalescent_nullish(None), None);
@@ -508,7 +508,7 @@ mod tests {
     /// une absence. `0` est falsy en JavaScript, donc c'est la valeur qu'un
     /// portage par veracite perdrait en silence.
     #[test]
-    fn un_created_a_zero_donne_l_epoch_et_non_l_absence() {
+    fn a_zero_created_yields_the_epoch_and_not_an_absence() {
         let metadata = get_response_metadata(&CopilotResponseInput {
             created: Some(0.0),
             ..Default::default()
@@ -522,7 +522,7 @@ mod tests {
     /// Les deux ternaires sont deux fonctions et non une seule : `0` les
     /// separe, `None` et une vraie date les rejoignent.
     #[test]
-    fn les_deux_ternaires_ne_sont_pas_un_seul() {
+    fn the_two_ternary_helpers_are_not_one() {
         assert_eq!(ternaire_nullish(Some(0.0)), Some(0));
         assert_eq!(ternaire_nullish(Some(1_700_000_000.0)), Some(1_700_000_000_000));
         assert_eq!(ternaire_nullish(None), None);
@@ -545,7 +545,7 @@ mod tests {
     /// Un `created` non nul devient un `Date` en millisecondes. Le nom change,
     /// l'unite aussi : `created` est en secondes, `timestamp` en millisecondes.
     #[test]
-    fn un_created_non_nul_devient_un_timestamp_en_millisecondes() {
+    fn a_non_null_created_becomes_a_millisecond_timestamp() {
         let metadata = get_response_metadata(&CopilotResponseInput {
             created: Some(1_700_000_000.0),
             ..Default::default()
@@ -562,7 +562,7 @@ mod tests {
     /// `created` absent ou `null` : pas de `timestamp`. Le ternaire teste la
     /// nullite, donc rien d'autre ne peut donner cette absence.
     #[test]
-    fn un_created_absent_ou_null_donne_un_timestamp_absent() {
+    fn a_missing_or_null_created_yields_no_timestamp() {
         let sans = get_response_metadata(&CopilotResponseInput::default());
         assert_eq!(sans.timestamp, None);
 
@@ -574,7 +574,7 @@ mod tests {
     /// `null` explicite vaut absence, pour les trois champs : c'est
     /// exactement ce que fait `?? undefined` dans la source.
     #[test]
-    fn un_null_explicite_vaut_une_absence() {
+    fn an_explicit_null_counts_as_absent() {
         let entree = parse_copilot_response_input(
             &json!({ "id": null, "created": null, "model": null }),
         )
@@ -591,7 +591,7 @@ mod tests {
     /// compile, il n'y a donc pas d'equivalent exact : le parseur se contente
     /// de ne pas inventer de conversion la ou le TypeScript n'en fait pas.
     #[test]
-    fn une_valeur_de_mauvais_type_est_refusee() {
+    fn a_value_of_the_wrong_type_is_rejected() {
         for (texte, attendue) in [
             (r#"{"id":42}"#, CopilotResponseInputError::IdNonChaine),
             (
@@ -623,7 +623,7 @@ mod tests {
     /// l'ecart que `parse_copilot_response_input` comble, et ce test le
     /// documente au lieu de le cacher.
     #[test]
-    fn la_lecture_serde_accepte_la_source_et_ignore_une_forme_fausse() {
+    fn serde_deserialization_accepts_the_source_shape_and_silently_ignores_a_wrong_one() {
         let relu: CopilotResponseInput =
             serde_json::from_str(r#"{"id":"x","model":"gpt-4o","created":1700000000}"#)
                 .expect("la forme de la source doit etre valide");
@@ -642,7 +642,7 @@ mod tests {
     /// Aller-retour : l'entree complete, la sortie, la relecture par le
     /// parseur, et le meme resultat des deux cotes.
     #[test]
-    fn un_all_et_ret_complet_ne_change_rien() {
+    fn a_full_round_trip_changes_nothing() {
         let charge = json!({ "id": "chatcmpl-1", "created": 1_700_000_000, "model": "gpt-4o" });
         let entree = parse_copilot_response_input(&charge).unwrap();
         let metadata = get_response_metadata(&entree);
@@ -664,7 +664,7 @@ mod tests {
     /// Une seule metadonnee presente : les deux autres cles n'apparaissent
     /// pas dans le JSON au lieu de sortir a `null`.
     #[test]
-    fn une_seule_metadonnee_presente_ne_produit_qu_une_cle() {
+    fn a_single_present_metadata_field_emits_only_its_key() {
         let metadata = get_response_metadata(&CopilotResponseInput {
             model: Some("gpt-4o".to_string()),
             ..Default::default()
@@ -679,7 +679,7 @@ mod tests {
     /// fonction que pour une cle qu'il ne connait pas, donc le cas n'est
     /// jamais atteint en production, mais il doit rester coherent.
     #[test]
-    fn la_liste_des_cles_et_la_detection_de_casse_sont_synchronisees() {
+    fn the_key_list_and_the_case_detection_stay_in_sync() {
         for cle in CLES_ENTREE {
             assert_eq!(cle_attendue_si_rapprochee(cle), Some(cle));
         }
@@ -704,7 +704,7 @@ mod tests {
     /// toute valeur non numerique, donc le cas n'est atteignable que par un
     /// `CopilotResponseInput` construit a la main.
     #[test]
-    fn un_nan_construit_a_la_main_ne_panique_pas() {
+    fn a_hand_built_nan_does_not_panic() {
         let manuel = get_response_metadata(&CopilotResponseInput {
             created: Some(f64::NAN),
             ..Default::default()

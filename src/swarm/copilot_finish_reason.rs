@@ -6,10 +6,11 @@
 //! Points de fidelite importants :
 //!
 //! - L'entree est `string | null | undefined`, ce qui devient `Option<&str>`.
-//!   En TypeScript `null` et `undefined` sont deux cas distincts du `switch`,
-//!   mais ils tombent tous les deux dans le meme `default`. En Rust ils
-//!   fusionnent en un seul `None` : c'est la seule difference, et elle n'a
-//!   aucune consequence car le `default` est commun aux deux.
+//!   Le `switch` de la source ne comporte **aucun** `case null` ni
+//!   `case undefined` : ces deux valeurs distinctes tombent donc toutes les
+//!   deux dans le `default` commun. En Rust elles fusionnent en un seul `None`,
+//!   ce qui est la seule difference entre les deux langages, et elle n'a aucune
+//!   consequence puisque le `default` est deja commun aux deux.
 //! - Le `default` du `switch` renvoie la **litterale** `"other"`. Il ne
 //!   renvoie jamais la valeur d'entree. Une raison inconnue, une chaine vide
 //!   ou une absence de raison donnent donc tous `"other"`, et non une
@@ -22,9 +23,21 @@
 //!   unifiee alors que la source OpenAI utilise un tiret bas ou rien du tout.
 //!   Ces tirets sont des caracteres d'echanges, ils sont figes ici.
 //!
-//! L'union `LanguageModelV3FinishReason["unified"]` du SDK contient aussi la
-//! valeur `"error"`. Cette fonction ne la produit jamais, donc la variante
-//! correspondante est volontairement absente plutot que d'etre inventee.
+//! L'union `LanguageModelV3FinishReason["unified"]` comporte **six** membres et
+//! non cinq : `stop`, `length`, `content-filter`, `tool-calls`, `error` et
+//! `other`. Le paquet `@ai-sdk/provider` n'est pas installe sur ce poste, mais la
+//! presence de `"error"` se deduit du depot lui-meme :
+//! `openai-compatible-chat-language-model.ts` type `finishReason.unified` par
+//! `ReturnType<typeof mapOpenAICompatibleFinishReason>` (ligne 342) puis lui
+//! affecte `unified: "error"` (lignes 396 et 409). La variante `Error` est donc
+//! declaree pour que le type reste complet sur le fil, **mais aucune branche du
+//! `match` ne la produit** : la fonction est pure, un `switch` sans effet de
+//! bord ne peut pas forger une erreur. Un test verrouille cette separation.
+//!
+//! Corollaire : la liste des cinq valeurs presentees dans le `match` est
+//! exhaustive pour la *fonction*, pas pour le *type*. C'est exactement la
+//! distinction que le `default` exerce, et c'est pourquoi `Error` est portee par
+//! l'enum sans etre atteignable par la fonction.
 
 use serde::{Deserialize, Serialize};
 
@@ -39,6 +52,13 @@ pub enum UnifiedFinishReason {
     ContentFilter,
     #[serde(rename = "tool-calls")]
     ToolCalls,
+    /// Membre de l'union du SDK que cette fonction ne produit jamais.
+    ///
+    /// Il figure ici pour que le type reste complet sur le fil : le modele de
+    /// chat voisin emet bien `unified: "error"`. Aucun bras du `match` n'y
+    /// aboutit, et `map_openai_compatible_finish_reason` le renvoie donc jamais.
+    #[serde(rename = "error")]
+    Error,
     #[serde(rename = "other")]
     Other,
 }
@@ -51,6 +71,7 @@ impl UnifiedFinishReason {
             UnifiedFinishReason::Length => "length",
             UnifiedFinishReason::ContentFilter => "content-filter",
             UnifiedFinishReason::ToolCalls => "tool-calls",
+            UnifiedFinishReason::Error => "error",
             UnifiedFinishReason::Other => "other",
         }
     }
@@ -175,6 +196,8 @@ mod tests {
 
     #[test]
     fn les_chaines_emises_sont_bien_celles_du_sdk() {
+        // Forme BARE STRING, pas un objet balise : le `switch` renvoie une
+        // litterale, donc la variante se serialise seule, jamais {"Stop": null}.
         assert_eq!(
             serde_json::to_string(&UnifiedFinishReason::Stop).unwrap(),
             "\"stop\""
@@ -192,6 +215,10 @@ mod tests {
             "\"tool-calls\""
         );
         assert_eq!(
+            serde_json::to_string(&UnifiedFinishReason::Error).unwrap(),
+            "\"error\""
+        );
+        assert_eq!(
             serde_json::to_string(&UnifiedFinishReason::Other).unwrap(),
             "\"other\""
         );
@@ -200,7 +227,7 @@ mod tests {
     #[test]
     fn chaque_variante_se_relit_depuis_sa_chaine() {
         let relues: Vec<UnifiedFinishReason> = serde_json::from_str(
-            "[\"stop\",\"length\",\"content-filter\",\"tool-calls\",\"other\"]",
+            "[\"stop\",\"length\",\"content-filter\",\"tool-calls\",\"error\",\"other\"]",
         )
         .unwrap();
         assert_eq!(
@@ -210,6 +237,7 @@ mod tests {
                 UnifiedFinishReason::Length,
                 UnifiedFinishReason::ContentFilter,
                 UnifiedFinishReason::ToolCalls,
+                UnifiedFinishReason::Error,
                 UnifiedFinishReason::Other,
             ]
         );
@@ -217,6 +245,94 @@ mod tests {
             assert_eq!(
                 serde_json::to_string(relue).unwrap(),
                 format!("\"{}\"", relue.as_str())
+            );
+        }
+    }
+
+    #[test]
+    fn error_est_dans_le_type_mais_jamais_produit_par_la_fonction() {
+        // Le modele de chat voisin emet `unified: "error"` (lignes 396 et 409 de
+        // openai-compatible-chat-language-model.ts), donc la chaine se relit.
+        assert_eq!(
+            serde_json::from_str::<UnifiedFinishReason>("\"error\"").unwrap(),
+            UnifiedFinishReason::Error
+        );
+        // Mais la fonction est pure : aucune entree ne peut la produire. C'est la
+        // separation type / fonction qui garantit que le `default` ne fabrique
+        // jamais une erreur non plus.
+        for entree in [
+            None,
+            Some(""),
+            Some("error"),
+            Some("Error"),
+            Some("stop"),
+            Some("length"),
+            Some("content_filter"),
+            Some("function_call"),
+            Some("tool_calls"),
+            Some("banane"),
+            Some("autre chose"),
+        ] {
+            assert_ne!(
+                map_openai_compatible_finish_reason(entree),
+                UnifiedFinishReason::Error,
+                "la fonction ne doit jamais produire Error, entree {:?}",
+                entree
+            );
+        }
+    }
+
+    #[test]
+    fn toute_entree_retombe_sur_une_valeur_unifiee_et_jamais_sur_sa_forme_brute() {
+        // Test de totalite : le `default` renvoie la litterale "other", donc
+        // l'image de la fonction est toujours une valeur du jeu unifie. Aucune
+        // entree ne peut se retrouver resortie telle quelle.
+        let autorisees = [
+            "stop",
+            "length",
+            "content-filter",
+            "tool-calls",
+            "error",
+            "other",
+        ];
+        let entrees = [
+            None,
+            Some(""),
+            Some(" "),
+            Some("stop"),
+            Some("stop "),
+            Some(" stop"),
+            Some("STOP"),
+            Some("Stop"),
+            Some("length"),
+            Some("Length"),
+            Some("max_tokens"),
+            Some("max_output_tokens"),
+            Some("content_filter"),
+            Some("Content_Filter"),
+            Some("content-filter"),
+            Some("function_call"),
+            Some("functionCall"),
+            Some("tool_calls"),
+            Some("tool-calls"),
+            Some("other"),
+            Some("error"),
+            Some("banane"),
+            Some("not_a_real_reason"),
+            Some("tool call"),
+            Some("stop\n"),
+            Some("\u{0}"),
+        ];
+        for entree in entrees {
+            let obtenue_str = map_openai_compatible_finish_reason(entree).as_str();
+            // Cette assertion suffit a interdire la recopie : si la sortie
+            // appartient toujours au jeu unifie, une entree comme "banane" ne
+            // peut structurellement pas ressortir inchangee.
+            assert!(
+                autorisees.contains(&obtenue_str),
+                "entree {:?} a produit {:?}, hors du jeu unifie",
+                entree,
+                obtenue_str
             );
         }
     }

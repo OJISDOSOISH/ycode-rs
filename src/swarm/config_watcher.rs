@@ -53,7 +53,8 @@
 //! motif a un chemin. Le seul point de contact possible est
 //! `ignore_or_empty`, qui reproduit le `?? []` de la source et rien de plus.
 //! Ce qui se brancherait dessus est l'affaire du portage de
-//! `filesystem/watcher.ts`, pas de ce fichier.
+//! `filesystem/watcher.ts`, pas de ce fichier. Aucune dependance n'a ete
+//! ajoutee.
 //!
 //! ## La forme exacte du champ `ignore`
 //!
@@ -77,6 +78,53 @@
 //! - Une chaine vide reste une chaine vide. Le `?? []` du consumer teste la
 //!   nullite, pas la veracite, donc un motif `""` le traverse intact. Un
 //!   ternaire l'aurait supprime. Voir le test dedie.
+//!
+//! ## Le point NON verifie : `null` dans `ignore`
+//!
+//! Le test `un_null_se_decode_en_absence_cote_serde` verrouille
+//! `{"ignore": null}` comme une absence. Ce qui est **certain**, c'est le
+//! comportement de Serde : `null` se decode en `None` pour un `Option`, sans
+//! qu'aucune option ne le demande. Ce qui ne l'est **pas**, c'est la parite
+//! avec Effect.
+//!
+//! L'hypothese a trancher est la suivante : `Schema.optional` n'etant pas
+//! appele avec `{ exact: true }`, il traiterait `null` comme `undefined`.
+//! **Elle n'a pas pu etre verifiee dans ce depot**, et voici ce qui a ete
+//! cherche :
+//!
+//! - `Schema.optional` sert des centaines de champs du depot
+//!   (`packages/schema/src/v1/*.ts`, `packages/protocol/src/groups/session.ts`,
+//!   `packages/core/src/config.ts`...), mais **jamais** avec un cas `null`
+//!   pose a cote, et aucune source de schema n'emploie `exact: true`. Aucune
+//!   autre utilisation ne permet donc de trancher.
+//! - Le decodeur d Effect n'est pas interrogeable ici : `node_modules` est
+//!   absent du depot opencode, donc aucun `Schema.decodeUnknown` ne peut etre
+//!   execute pour verifier le comportement reel.
+//! - `patches/effect@4.0.0-beta.83.patch` ne touche que `HttpApiSchema`, pas
+//!   `PropertySignature` : il ne modifie donc pas ce comportement de notre
+//!   cote.
+//!
+//! Consequence a connaitre : si Effect refuse `null` sur une propriete
+//! optionnelle non exacte, alors `{"ignore": null}` **est** une erreur de
+//! decodage cote TypeScript, la ou le derive Serde l'accepte ici. Le test
+//! reste en place parce qu'il verrouille une verite qui, elle, ne depend pas
+//! d Effect : ce que fait Serde. Le jour ou la parite est etablie, le
+//! correctif tient en un `deserialize_with` qui refuse `null` sur le champ,
+//! et rien d'autre ne change.
+//!
+//! L'hypothese se propage au niveau superieur : `config.ts` ligne 69 declare
+//! `watcher: ConfigWatcher.Info.pipe(Schema.optional)`, donc `{"watcher":
+//! null}` est soumis a la meme question. Ce fichier ne porte que le niveau
+//! interieur.
+//!
+//! ## Rappel pour l'agent principal
+//!
+//! Le module **est** declare : `src/swarm/mod.rs` porte `pub mod
+//! config_watcher;` a la ligne 29.
+//!
+//! Les tests sont purs et instantanes : aucun thread, aucune attente, aucun
+//! `sleep`, et **aucun acces au systeme de fichiers**. La source elle-meme
+//! n'en fait aucun non plus, ce qui permet de la porter entierement hors ligne.
 
 use serde::{Deserialize, Serialize};
 
@@ -108,9 +156,11 @@ pub struct Info {
     /// presente : elle n'est pas la meme chose qu'une absence, et le JSON les
     /// distingue (`{"ignore": []}` contre `{}`).
     ///
-    /// Cote decodage, `null` est lu comme une absence. C'est le comportement de
-    /// `Schema.optional` par defaut, qui n'est pas `exact` et traite donc
-    /// `null` comme `undefined`.
+    /// Cote decodage, `null` se lit comme une absence : c'est le comportement
+    /// de `Option` sous Serde, et il n'a rien a voir avec une hypothese sur
+    /// Effect. La parite avec `Schema.optional` sans `exact: true`, qui
+    /// accepterait `null` comme `undefined`, **n'est pas verifiee** ; voir la
+    /// section « Le point NON verifie » du module.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ignore: Option<Ignore>,
 }
@@ -233,12 +283,35 @@ mod tests {
     }
 
     #[test]
-    fn une_valeur_nulle_vaut_une_absence_de_motif() {
-        // `Schema.optional` n'est pas `exact` par defaut : `null` est traite
-        // comme `undefined`. Serde fait pareil pour un `Option`.
+    fn un_null_se_decode_en_absence_cote_serde_et_la_parite_effect_reste_non_verifiee() {
+        // Ce que ce test prouve, c'est le comportement de Serde : `null` se
+        // decode en `None` pour un `Option`, sans aucune option sur le champ.
+        // Ce qu'il ne prouve PAS, c'est la parite avec `Schema.optional` sans
+        // `exact: true`, qui accepterait `null` comme `undefined` : cette
+        // hypothese n'a pas pu etre verifiee dans le depot (node_modules
+        // absent, aucune autre occurrence de `Schema.optional` avec un cas
+        // `null` a cote). Si Effect refuse `null` ici, `{"ignore": null}` est
+        // une erreur cote TS et une absence ici : c'est le seul ecart possible
+        // de ce fichier, et il est assume.
         let info: Info = serde_json::from_value(json!({ "ignore": null })).unwrap();
 
         assert_eq!(info, Info::new());
+        assert!(info.ignore.is_none());
+        assert!(info.ignore_or_empty().is_empty());
+        // Une absence se reecrit sans la cle, jamais avec `null`.
+        assert_eq!(serde_json::to_value(&info).unwrap(), json!({}));
+    }
+
+    #[test]
+    fn null_comme_champ_entier_est_une_absence_mais_null_dans_la_liste_est_refuse() {
+        // L'asymetrie que le derive introduit, et le lieu exact ou une
+        // correction devra etre appliquee : `null` a la place du champ
+        // donne `None`, `null` dans le tableau ne donne pas `Vec<String>`.
+        let absence: Info = serde_json::from_value(json!({ "ignore": null })).unwrap();
+        assert_eq!(absence, Info::new());
+
+        let liste: Result<Info, _> = serde_json::from_value(json!({ "ignore": [null] }));
+        assert!(liste.is_err(), "un null dans la liste ne peut pas devenir \"\"");
     }
 
     #[test]
@@ -282,7 +355,8 @@ mod tests {
     #[test]
     fn une_valeur_qui_n_est_pas_une_liste_de_chaines_est_refusee() {
         // `Schema.String.pipe(Schema.Array, Schema.optional)` refuse tout ce qui
-        // n'est pas un tableau de chaines, et ne convertit rien.
+        // n'est pas un tableau de chaines, et ne convertit rien. `null` est
+        // traite a part, dans le test dedie ci-dessus.
         for invalide in [
             json!({ "ignore": ".git" }),
             json!({ "ignore": 1 }),
@@ -306,5 +380,32 @@ mod tests {
         let info: Info = serde_json::from_value(json!({ "ignore": [".git"], "inconnu": 42 })).unwrap();
 
         assert_eq!(info.ignore_or_empty(), vec![".git"]);
+    }
+
+    // ------------------------------------------------------------------ purete
+
+    #[test]
+    fn la_methode_rend_une_copie_et_ne_modifie_jamais_la_configuration() {
+        // Le `?? []` de la source ne fait que lire. La copie est donc la seule
+        // garantie qu'un appelant qui complete la liste finale ne touche pas
+        // la configuration d'origine.
+        let info = Info::with_ignore(vec![".git".to_string()]);
+
+        let mut copie = info.ignore_or_empty();
+        copie.push("ajout-de-l-appelant".to_string());
+
+        assert_eq!(copie.len(), 2);
+        assert_eq!(info.ignore_or_empty(), vec![".git"]);
+        assert_eq!(serde_json::to_value(&info).unwrap(), json!({ "ignore": [".git"] }));
+    }
+
+    #[test]
+    fn deux_appels_identiques_rendent_le_meme_resultat() {
+        // Aucun thread, aucune attente, aucun acces disque : la fonction est
+        // pure, donc la repetition ne peut rien changer.
+        let info = Info::with_ignore(vec!["a".to_string(), "b".to_string()]);
+
+        assert_eq!(info.ignore_or_empty(), info.ignore_or_empty());
+        assert_eq!(Info::new().ignore_or_empty(), Info::new().ignore_or_empty());
     }
 }

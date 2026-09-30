@@ -408,32 +408,32 @@ mod tests {
     // -- REPLAY_CHUNK ------------------------------------------------------
 
     #[test]
-    fn la_taille_de_tranche_vaut_soixante_quatre_kio() {
+    fn replay_chunk_size_is_sixty_four_kibibytes() {
         assert_eq!(REPLAY_CHUNK, 64 * 1024);
         assert_eq!(REPLAY_CHUNK, 65_536);
     }
 
     #[test]
-    fn l_octet_de_controle_vaut_zero() {
+    fn control_byte_is_zero() {
         assert_eq!(OCTET_CONTROLE, 0x00);
     }
 
     // -- chunks ------------------------------------------------------------
 
     #[test]
-    fn une_chaine_vide_ne_donne_aucune_trame() {
+    fn empty_string_yields_no_frames() {
         // La source : la boucle `for (i = 0; i < 0)` n entre jamais, donc le
         // tableau rendu est vide, et non un tableau d une chaine vide.
         assert_eq!(chunks(""), Vec::<String>::new());
     }
 
     #[test]
-    fn une_chaine_courte_reste_en_une_seule_trame() {
+    fn short_string_stays_in_a_single_frame() {
         assert_eq!(chunks("abc"), vec!["abc".to_string()]);
     }
 
     #[test]
-    fn une_tranche_de_la_taille_exacte_ne_donne_qu_un_morceau_plein() {
+    fn input_of_exactly_the_chunk_size_yields_one_full_frame() {
         let data = repete(REPLAY_CHUNK, 'x');
         let trames = chunks(&data);
         assert_eq!(trames.len(), 1, "la borne est atteinte exactement, pas depassee");
@@ -441,7 +441,7 @@ mod tests {
     }
 
     #[test]
-    fn une_tranche_d_un_octet_de_plus_donne_deux_morceaux_et_se_recolle() {
+    fn input_one_char_over_the_chunk_size_yields_two_frames_that_rejoin() {
         let data = repete(REPLAY_CHUNK + 1, 'x');
         let trames = chunks(&data);
         assert_eq!(trames.len(), 2);
@@ -451,7 +451,7 @@ mod tests {
     }
 
     #[test]
-    fn les_trames_se_recollent_sans_perte_ni_doublon() {
+    fn frames_rejoin_without_loss_or_duplication() {
         let data = format!("{}{}{}", repete(REPLAY_CHUNK, 'a'), repete(1, 'b'), repete(2 * REPLAY_CHUNK + 7, 'c'));
         let trames = chunks(&data);
         assert_eq!(trames.len(), 4);
@@ -459,7 +459,7 @@ mod tests {
     }
 
     #[test]
-    fn aucune_trame_ne_depasse_la_taille_annoncee() {
+    fn no_frame_exceeds_the_advertised_size() {
         // La borne vaut pour toutes les trames, pas seulement pour la
         // premiere : c est elle qui borne la taille d une trame de transport.
         let data = repete(3 * REPLAY_CHUNK + 11, 'x');
@@ -473,7 +473,7 @@ mod tests {
     }
 
     #[test]
-    fn un_accent_pose_a_la_frontiere_ne_produit_panique_ni_casse() {
+    fn accented_char_at_the_boundary_neither_panics_nor_corrupts() {
         // Le piege du lot : un portage par index d'octet couperait l'accent en
         // deux ici, car il tient sur deux octets et commence a l'index 65 535.
         // En unites UTF-16, en revanche, il compte pour un, donc il finit la
@@ -486,7 +486,7 @@ mod tests {
     }
 
     #[test]
-    fn un_emoji_a_la_frontiere_est_reculee_d_un_seul_caractere_et_non_coupe() {
+    fn emoji_at_the_boundary_is_backed_off_by_one_character_and_not_split() {
         // L'emoji pese deux unites UTF-16 : la coupure logique tombe dans son
         // couple de surrogates. La source livre alors deux pseudo surrogates
         // isoles, que son encodage transforme en U+FFFD. Le portage s'arrete au
@@ -504,7 +504,7 @@ mod tests {
     }
 
     #[test]
-    fn un_texte_melange_d_accents_et_d_emoji_se_recolle_sans_perte() {
+    fn mixed_text_of_accents_and_emoji_rejoins_without_loss() {
         let modele = "a\u{e9}\u{1f600}z\u{e8}\u{1f1eb}\u{1f1f7}";
         let data = repete(REPLAY_CHUNK, 'a') + modele;
         let trames = chunks(&data);
@@ -517,19 +517,19 @@ mod tests {
     // -- meta_frame --------------------------------------------------------
 
     #[test]
-    fn le_cadre_de_controle_commence_par_l_octet_zero() {
+    fn control_frame_starts_with_the_zero_byte() {
         let cadre = meta_frame(42);
         assert_eq!(cadre[0], 0x00);
     }
 
     #[test]
-    fn le_cadre_de_controle_contient_le_json_du_curseur() {
+    fn control_frame_contains_the_cursor_json() {
         let cadre = meta_frame(42);
         assert_eq!(&cadre[1..], br#"{"cursor":42}"#);
     }
 
     #[test]
-    fn le_json_du_cadre_de_controle_ne_contient_que_la_cle_cursor() {
+    fn control_frame_json_holds_only_the_cursor_key() {
         // Premier piege du lot : la cle est `cursor`, en minuscules, et rien
         // d'autre ne doit apparaitre.
         let json = serde_json::to_string(&CadreControle::nouveau(7)).expect("serialisation");
@@ -546,7 +546,7 @@ mod tests {
     }
 
     #[test]
-    fn un_curseur_nul_ou_negatif_sort_tel_quel_et_n_est_pas_confondu_avec_une_absence() {
+    fn zero_or_negative_cursor_is_encoded_verbatim_and_is_not_a_missing_cursor() {
         // Piege `?` contre `??` : zero et les valeurs negatives sont des
         // curseurs presents, pas des curseurs manquants.
         assert_eq!(&meta_frame(0)[1..], br#"{"cursor":0}"#);
@@ -555,7 +555,7 @@ mod tests {
     }
 
     #[test]
-    fn une_cle_cursor_mal_ecrite_est_refusee_a_la_relecture() {
+    fn misspelled_cursor_key_is_rejected_on_read() {
         // Sans renommage explicite, la faute passerait la compilation et ne
         // serait vue qu'a l'echange avec le TypeScript.
         let correct: Result<CadreControle, _> = serde_json::from_str(r#"{"cursor":42}"#);
@@ -569,7 +569,7 @@ mod tests {
     }
 
     #[test]
-    fn un_curseur_fractionnaire_ou_nan_est_refuse_la_ou_la_source_ecrirait_null() {
+    fn fractional_or_nan_cursor_is_rejected_where_the_source_would_write_null() {
         // Cout documente du passage de `number` a entier : la source ecrirait
         // `{"cursor":null}` pour un NaN, et `1.5` tel quel. Les deux sont
         // refuses ici plutot qu arrondis en silence.
@@ -584,7 +584,7 @@ mod tests {
     // -- aller-retour des trames -------------------------------------------
 
     #[test]
-    fn un_cadre_de_controle_se_relit_identique() {
+    fn control_frame_reads_back_identical() {
         let cadre = meta_frame(4096);
         assert_eq!(
             Cadre::depuis_octets(&cadre).expect("le cadre produit par meta_frame se relit"),
@@ -593,7 +593,7 @@ mod tests {
     }
 
     #[test]
-    fn une_trame_de_donnees_se_relit_identique() {
+    fn data_frame_reads_back_identical() {
         let texte = "total 12\n\u{e9}t\u{e9}\u{1f600}\n";
         let cadre = Cadre::donnees(texte);
         assert_eq!(cadre.vers_octets(), texte.as_bytes());
@@ -604,7 +604,7 @@ mod tests {
     }
 
     #[test]
-    fn une_trame_de_donnees_vide_se_relit_en_donnees_vides() {
+    fn empty_data_frame_reads_back_as_empty_data() {
         // La source ne produit jamais une trame vide, puisque `chunks("")` ne
         // rend aucun element. Le portage accepte l nevertheless plutot que de
         // le refuser.
@@ -614,13 +614,13 @@ mod tests {
     }
 
     #[test]
-    fn une_trame_binaire_invalide_est_refusee() {
+    fn invalid_binary_frame_is_rejected() {
         let resultat = Cadre::depuis_octets(&[0xff, 0xfe, 0xfd]);
         assert_eq!(resultat, Err(ErreurCadre { taille: 3 }));
     }
 
     #[test]
-    fn un_zero_de_tete_suivi_d_un_json_incomplet_redonne_des_donnees() {
+    fn leading_zero_followed_by_incomplete_json_falls_back_to_data() {
         // L'octet nul annonce un controle, mais une sortie de terminal peut
         // commencer par lui. Le repli evite de perdre la sortie.
         let cadre = Cadre::depuis_octets(&[0x00, b'{']).expect("repli sur les donnees");
@@ -628,7 +628,7 @@ mod tests {
     }
 
     #[test]
-    fn une_trame_de_donnees_commencant_par_un_nul_reste_une_tranche_de_donnees() {
+    fn data_frame_starting_with_a_nul_stays_a_data_frame() {
         // Tant que ce qui suit le nul n'est pas un JSON de controle, c'est une
         // sortie, pas un cadre de controle.
         let cadre = Cadre::depuis_octets(b"\x00\x1b[31mrouge").expect("trame relue");
@@ -636,7 +636,7 @@ mod tests {
     }
 
     #[test]
-    fn un_champ_inconnu_dans_le_cadre_de_controle_est_ignore_comme_en_javascript() {
+    fn unknown_field_in_the_control_frame_is_ignored_as_in_javascript() {
         // `JSON.parse` puis `.cursor` ignore les cles en trop, et serde_json
         // aussi : les deux lectures restent compatibles.
         let cadre = Cadre::depuis_octets(b"\x00{\"cursor\":5,\"extra\":1}").expect("trame relue");
@@ -646,7 +646,7 @@ mod tests {
     // -- decode_input ------------------------------------------------------
 
     #[test]
-    fn un_message_texte_passe_telle_quelle() {
+    fn text_message_passes_through_unchanged() {
         assert_eq!(
             decode_input(MessageEntree::Texte("ready".to_string())),
             Some("ready".to_string())
@@ -654,7 +654,7 @@ mod tests {
     }
 
     #[test]
-    fn des_octets_utf8_valides_sont_decodes() {
+    fn valid_utf8_bytes_are_decoded() {
         assert_eq!(
             decode_input(MessageEntree::Octets(b"hello".to_vec())),
             Some("hello".to_string())
@@ -662,21 +662,21 @@ mod tests {
     }
 
     #[test]
-    fn des_octets_invalides_sont_abandonnes_et_non_remplaces() {
+    fn invalid_bytes_are_dropped_and_not_replaced() {
         // `fatal: true` : la source abandonne la frame, elle ne la remplace pas
         // par un U+FFFD comme le ferait un decodeur lenient.
         assert_eq!(decode_input(MessageEntree::Octets(vec![0xff, 0xfe, 0xfd])), None);
     }
 
     #[test]
-    fn un_surrogate_encode_en_utf8_est_abandonne() {
+    fn surrogate_encoded_as_utf8_is_dropped() {
         // CESU-8 : les trois octets d'un U+D800. Un decodeur lenient en
         // ferait un caractere de remplacement, un decodeur fatal refuse.
         assert_eq!(decode_input(MessageEntree::Octets(vec![0xed, 0xa0, 0x80])), None);
     }
 
     #[test]
-    fn un_message_vide_est_present_et_non_absent() {
+    fn empty_message_is_present_and_not_absent() {
         // Le piege `?` contre `??` du lot. Les appelants de la source ecrivent
         // `decoded !== undefined` : un message vide est donc ecrit dans le
         // pseudo terminal. `Some("")` et non `None`, sur les deux chemins.
@@ -686,7 +686,7 @@ mod tests {
     }
 
     #[test]
-    fn un_bom_en_tete_est_retire_comme_par_le_decodeur_de_la_source() {
+    fn leading_bom_is_stripped_like_the_source_decoder() {
         // `new TextDecoder("utf-8", { fatal: true })` a `ignoreBOM: false`, donc
         // il retire le BOM de sa sortie. `String::from_utf8` le garde, il faut
         // donc le retirer ici pour rester compatible.
@@ -695,7 +695,7 @@ mod tests {
     }
 
     #[test]
-    fn un_bom_seul_donne_une_chaine_vide_et_non_absente() {
+    fn bom_alone_yields_an_empty_string_and_not_absence() {
         // La distinction reste visible apres le retrait du BOM : le message
         // est valide, donc il donne une chaine vide.
         let octets = vec![0xef, 0xbb, 0xbf];
@@ -703,7 +703,7 @@ mod tests {
     }
 
     #[test]
-    fn un_bom_qui_n_est_pas_en_tete_n_est_pas_retire() {
+    fn bom_not_at_the_start_is_not_stripped() {
         let octets = "a\u{feff}b".as_bytes().to_vec();
         assert_eq!(
             decode_input(MessageEntree::Octets(octets)),
@@ -712,7 +712,7 @@ mod tests {
     }
 
     #[test]
-    fn un_message_texte_n_a_pas_son_bom_retire() {
+    fn text_message_keeps_its_leading_bom() {
         // Le chemin `typeof message === "string"` de la source renvoie la
         // chaine sans passer par le decodeur : le BOM y reste.
         assert_eq!(
@@ -722,7 +722,7 @@ mod tests {
     }
 
     #[test]
-    fn des_octets_multi_octets_sont_decodes_sans_cassure() {
+    fn multi_byte_bytes_are_decoded_without_corruption() {
         let texte = "h\u{e9}llo \u{1f600} \u{1f1eb}\u{1f1f7}";
         assert_eq!(
             decode_input(MessageEntree::Octets(texte.as_bytes().to_vec())),
@@ -731,7 +731,7 @@ mod tests {
     }
 
     #[test]
-    fn les_trois_formes_de_la_source_se_construisent_de_la_maniere_du_type() {
+    fn all_three_source_forms_are_built_by_the_from_impls() {
         // Les trois formes du parametre `message` : deux donnent la meme
         // variante, car la source convertit l'ArrayBuffer en Uint8Array.
         assert_eq!(

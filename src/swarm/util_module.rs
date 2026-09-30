@@ -572,7 +572,7 @@ mod tests {
     // --- Partie pure : aucune de ces fonctions ne touche le disque ---
 
     #[test]
-    fn un_specifiant_nu_donne_le_paquet_et_le_sous_chemin() {
+    fn a_bare_specifier_yields_the_package_and_the_subpath() {
         // Le cas des trois appelants du depot. Le sous-chemin porte la barre
         // oblique, donc le chemin du paquet est toujours `package + subpath`.
         assert_eq!(
@@ -592,7 +592,7 @@ mod tests {
     }
 
     #[test]
-    fn un_paquet_a_portee_porte_le_nom_complet() {
+    fn a_scoped_package_keeps_its_full_name() {
         // Piege : `@scope/pkg/sub` ne doit pas donner `@scope` comme paquet.
         // `node_modules/@scope/pkg` est un seul dossier, donc couper trop tot
         // chercherait un dossier inexistant et ne trouverait jamais rien.
@@ -620,7 +620,7 @@ mod tests {
     }
 
     #[test]
-    fn un_specifiant_relatif_ou_absolu_nest_pas_un_paquet() {
+    fn a_relative_or_absolute_specifier_is_not_a_package() {
         for relatif in ["./x", "../x", ".", "..", "/x/y"] {
             assert_eq!(
                 specifier(relatif),
@@ -668,7 +668,7 @@ mod tests {
     }
 
     #[test]
-    fn une_chaine_vide_ou_voisine_ne_provoque_panique() {
+    fn an_empty_or_near_empty_string_does_not_panic() {
         // Hors contrat, mais la source ne leve pas non plus : elle rend
         // `undefined`. Aucune de ces entrees ne doit paniquer ni produire un
         // chemin qui ressemble a un resultat.
@@ -690,7 +690,7 @@ mod tests {
     }
 
     #[test]
-    fn les_repertoires_node_modules_remontent_du_plus_profond() {
+    fn node_modules_directories_are_listed_from_the_deepest_ancestor_to_the_root() {
         // L'ordre porte tout le sens de la resolution : le paquet le plus
         // proche gagne. La racine est examinee en dernier.
         let base = PathBuf::from(if cfg!(windows) {
@@ -723,7 +723,7 @@ mod tests {
     }
 
     #[test]
-    fn un_ancetre_nomme_node_modules_ne_produit_pas_de_doublon() {
+    fn an_ancestor_named_node_modules_produces_no_duplicate() {
         // `node_modules/node_modules` ne sert a rien et Node ne le teste pas.
         let base = PathBuf::from(if cfg!(windows) {
             r"C:\p\node_modules\pkg"
@@ -748,7 +748,7 @@ mod tests {
     }
 
     #[test]
-    fn le_repertoire_de_base_est_le_dir_normalise() {
+    fn base_dir_normalizes_dir_and_drops_the_package_json_name() {
         // `path.join(dir, "package.json")` puis son `dirname` : le nom de
         // fichier disparait, mais la normalisation, elle, reste.
         //
@@ -784,7 +784,7 @@ mod tests {
     }
 
     #[test]
-    fn un_repertoire_de_base_vide_ou_point_vaut_le_repertoire_courant() {
+    fn an_empty_or_dot_base_directory_equals_the_current_directory() {
         // `path.join("", "package.json")` vaut `"package.json"`, dont le
         // `dirname` vaut `""`, que `path.resolve` ancre sur le cwd. Les deux
         // ecritures doivent donc donner le meme depart, et ce depart est le
@@ -799,7 +799,7 @@ mod tests {
     }
 
     #[test]
-    fn les_extensions_sont_essayees_dans_l_ordre_du_node() {
+    fn extensions_are_tried_in_node_order_and_the_directory_comes_last() {
         // L'ordre est significant quand deux fichiers coexistent : un
         // dossier `x.js` ne doit pas gagner contre un fichier `x`.
         let base = if cfg!(windows) { r"C:\base" } else { "/base" };
@@ -840,7 +840,7 @@ mod tests {
     }
 
     #[test]
-    fn un_specifiant_absolu_ignore_le_repertoire_de_base() {
+    fn an_absolute_specifier_ignores_the_base_directory() {
         // Node resout un chemin absolu sans passer par l ancrage.
         let absolu = if cfg!(windows) { r"C:\abs\y" } else { "/abs/y" };
         let premier = &candidates(absolu, if cfg!(windows) {
@@ -855,7 +855,7 @@ mod tests {
     // --- Partie disque : les quatre cas du fichier de tests du depot ---
 
     #[test]
-    fn resout_un_sous_chemin_de_paquet() {
+    fn resolves_a_package_subpath() {
         // `packages/opencode/test/util/module.test.ts:15`.
         let tmp = Tmp::nouveau("subpath");
         let root = tmp.chemin().join("proj");
@@ -870,7 +870,7 @@ mod tests {
     }
 
     #[test]
-    fn resout_un_paquet_a_travers_un_ancetre() {
+    fn resolves_a_package_from_an_ancestor_node_modules() {
         // `packages/opencode/test/util/module.test.ts:30`. Le paquet est pose
         // a la racine, la resolution part de `root/apps/web` : c'est le seul
         // test qui verifie la remonte des ancetres.
@@ -890,7 +890,7 @@ mod tests {
     }
 
     #[test]
-    fn deux_repertoires_de_base_indaumentaires_ne_se_confondent_pas() {
+    fn two_independent_base_directories_resolve_the_same_package_separately() {
         // `packages/opencode/test/module.test.ts:50` a `:52`. Deux arbres
         // distincts portant le meme paquet doivent rester distincts : c'est la
         // preuve que la resolution est relative au `dir` fourni et non au
@@ -912,7 +912,7 @@ mod tests {
     }
 
     #[test]
-    fn un_paquet_absent_rend_none() {
+    fn a_missing_package_returns_none() {
         // `packages/opencode/test/util/module.test.ts:57`. Le `catch {}` vide
         // de la source rend `undefined`, donc `None` ici. Un nom peu commun
         // evite de tomber par hasard sur un paquet reellement installe plus
@@ -925,7 +925,7 @@ mod tests {
     }
 
     #[test]
-    fn un_echec_ne_rend_jamais_de_chaine_vide() {
+    fn a_failed_resolution_never_returns_an_empty_string() {
         // Le contrat le plus fragile du fichier. `Some("")` serait
         // indiscernable d une resolution qui aurait reussi sur un chemin vide,
         // et un `Err` ferait croire que l'appelant doit lever.
@@ -950,7 +950,7 @@ mod tests {
     // --- Ordre interne du dossier : main, puis index ---
 
     #[test]
-    fn main_gagne_sur_index() {
+    fn main_wins_over_index() {
         let tmp = Tmp::nouveau("main");
         let main = tmp.fichier("p/node_modules/pkg/lib/api.js", "x");
         tmp.json(
@@ -965,7 +965,7 @@ mod tests {
     }
 
     #[test]
-    fn index_prend_le_reliquat_lorsque_main_manque_ou_ne_resout_pas() {
+    fn index_is_used_when_main_is_missing_or_does_not_resolve() {
         // Trois cas distincts de `LOAD_AS_DIRECTORY`, qui doivent tous finir
         // sur `index` : pas de manifeste, `main` fantome, `main` vide.
         let tmp = Tmp::nouveau("index");
@@ -994,7 +994,7 @@ mod tests {
     }
 
     #[test]
-    fn un_manifeste_invalide_est_traite_comme_absent() {
+    fn an_invalid_manifest_is_treated_as_absent() {
         // Un `package.json` illisible ne doit pas faire paniquer, et le
         // resultat doit rester le meme que sans manifeste : c'est ce que
         // produit le `catch {}` de la source.
@@ -1009,7 +1009,7 @@ mod tests {
     }
 
     #[test]
-    fn un_sous_chemin_vide_ne_tombe_pas_sur_le_paquet_lui_meme() {
+    fn an_empty_subpath_never_yields_the_package_directory_itself() {
         // `pkg` et `pkg/` doivent produire la meme liste de candidats : le
         // dossier du paquet n est un candidat valide que par `main` ou
         // `index`, jamais directement.
@@ -1018,7 +1018,7 @@ mod tests {
     }
 
     #[test]
-    fn la_resolution_est_independante_du_repertoire_courant() {
+    fn resolution_is_independent_of_the_current_directory() {
         // Le point faible des tests disque : on ne peut pas changer le cwd
         // sans perturber les autres tests. Ce test verifie donc l'inverse,
         // que tout se joue sur le `dir` fourni.
