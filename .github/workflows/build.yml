@@ -100,7 +100,11 @@ jobs:
         if: failure() && steps.compile.conclusion == 'failure'
         run: |
           $cur = $null
-          foreach ($l in Get-Content compile.log) {
+          foreach ($raw in Get-Content compile.log) {
+            # cargo ecrit en couleurs (CARGO_TERM_COLOR=always) : on denude
+            # les sequences d'echappement ANSI avant tout test, sinon ^error
+            # ne matche jamais et l'exfiltration sort vide (constate run 9f55513).
+            $l = $raw -replace "`e\[[0-9;]*m", ""
             if ($l -match '^error(\[E\d+\])?: (.*)') { $cur = $Matches[2] }
             elseif ($cur -and $l -match '-->\s+([^:]+):(\d+)') {
               Write-Output "::error file=$($Matches[1]),line=$($Matches[2])::$cur"
