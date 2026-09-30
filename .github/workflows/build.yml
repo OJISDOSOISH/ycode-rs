@@ -92,20 +92,18 @@ jobs:
           if-no-files-found: error
 
       # Exfiltration des erreurs sans acces aux logs (403 en anonyme) :
-      # resume visible sur la page du run + log complet pousse sur la
-      # branche ci-logs, lisible sans authentification. En fin de job pour
-      # ne pas changer l'arbre avant les etapes de test.
+      # on re-emet chaque erreur en commande d'annotation GitHub, qui est
+      # lisible sans authentification via l'API annotations (fichier+ligne).
+      # Pas de push : le token du runner n'a pas l'ecriture (branche ci-logs
+      # restee inexistante, constate sur le run precedent).
       - name: Publier erreurs compilation
         if: failure() && steps.compile.conclusion == 'failure'
-        shell: bash
         run: |
-          { echo '## Erreurs compilation'; echo '```'; grep -E '^(error| *-->)' compile.log | head -60; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-          git config user.name "ci-exfil"
-          git config user.email "ci-exfil@local"
-          git fetch origin ci-logs:ci-logs 2>/dev/null || git checkout -b ci-logs
-          git checkout ci-logs 2>/dev/null || true
-          mkdir -p ci-logs
-          grep -E '^(error| *-->)' compile.log | head -100 > "ci-logs/${{ github.run_id }}.txt" || true
-          git add ci-logs
-          git commit -m "log ${{ github.run_id }}" 2>/dev/null || true
-          git push origin ci-logs 2>/dev/null || true
+          $cur = $null
+          foreach ($l in Get-Content compile.log) {
+            if ($l -match '^error(\[E\d+\])?: (.*)') { $cur = $Matches[2] }
+            elseif ($cur -and $l -match '-->\s+([^:]+):(\d+)') {
+              Write-Output "::error file=$($Matches[1]),line=$($Matches[2])::$cur"
+              $cur = $null
+            }
+          }
