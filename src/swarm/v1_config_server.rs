@@ -438,7 +438,7 @@ mod tests {
     }
 
     #[test]
-    fn la liste_cors_conserve_un_seul_element() {
+    fn la_liste_cors_conserve_un_seul_element() {
         let server: Server = serde_json::from_str(r#"{"cors":["https://seul.test"]}"#).unwrap();
         assert_eq!(server.cors, Some(vec!["https://seul.test".to_string()]));
 

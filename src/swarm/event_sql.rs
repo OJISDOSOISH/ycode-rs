@@ -18,9 +18,8 @@
 //! ])
 //! ```
 //!
-//! Il n y a donc aucune logique metier a isoler. La source ne contient pas
-//! davantage de logique dans ses details : elle ne lit pas, elle n ecrit pas, elle
-//! ne trie pas. Ce qu elle fait, c est *decrire*.
+//! Il n y a donc aucune logique metier a isoler. La source ne lit pas, elle
+//! n ecrit pas, elle ne trie pas. Ce qu elle fait, c est *decrire*.
 //!
 //! ## Ce qui n a pas de traduction ici, et pourquoi
 //!
@@ -44,10 +43,9 @@
 //!   Drizzle. Repris comme une donnee, colonne par colonne.
 //! - `.$type<EventV2.ID>()` et `.$type<Record<string, unknown>>()` : types
 //!   fantomes, **effet nul a l execution**. Ils documentent le contenu attendu
-//!   et disparaissent a la compilation. `EventV2.ID` vit dans
-//!   `packages/core/src/event`, qui n est pas porte par ce fichier : le type
-//!   Rust de l identifiant d evenement n est donc pas defini ici, il viendra du
-//!   portage de ce module-la.
+//!   et disparaissent a la compilation. `EventV2.ID` est une chaine marquee qui
+//!   commence par `evt_` (`packages/schema/src/event.ts`), donc `String` suffit
+//!   ici ; le type exact viendra du portage de ce module-la.
 //!
 //! **Aucun DDL n est ecrit dans ce fichier.** Ni `CREATE TABLE`, ni
 //! `CREATE INDEX`, ni squelette de migration, ni chaine SQL, ni couche
@@ -60,18 +58,17 @@
 //! Deux choses, et deux seulement.
 //!
 //! 1. **La declaration elle-meme, en donnees pures.** Noms des tables, noms des
-//!    colonnes dans leur ordre de declaration, type de stockage, nullabilite,
-//!    cle primaire, mode json, cle etrangere et sa regle de suppression, noms
-//!    et colonnes des deux index. C est une transcription exacte de ce que la
-//!    source declare, sous une forme que l on peut interroger sans base de
-//!    donnees. Le jour ou la couche SQL arrive, c est cette description qu elle
-//!    pourra consommer, ou qu elle remplacera.
+//!    colonnes dans leur ordre de declaration, type de stockage, nullabilite
+//!    ecrite, cle primaire, mode json, cle etrangere et sa regle de suppression,
+//!    noms et colonnes des deux index. C est une transcription exacte de ce que
+//!    la source declare, sous une forme que l on peut interroger sans base de
+//!    donnees.
 //!
 //! 2. **Les invariants que ces declarations imposent, en fonctions pures** sur
 //!    une tranche de donnees. Un index unique, une cle etrangere et une
 //!    regle `on delete cascade` sont des contraintes. La base les applique ; en
 //!    son absence, on peut en revanche ecrire ce qu elles *signifient*, et le
-//!    tester sur un `&[EventRow]`. Trois fonctions, trois contraintes :
+//!    tester sur un `&[EventRow]`. Quatre fonctions, quatre contraintes :
 //!
 //!    - `conflits_de_sequence` : ce que l index unique sur
 //!      `(aggregate_id, seq)` interdit.
@@ -79,25 +76,76 @@
 //!      interdit, avant que la base ne le refuse a l ecriture.
 //!    - `evenements_survivants_a_la_suppression` : ce que `on delete cascade`
 //!      produit sur la table enfant.
+//!    - `positions_avec_donnee_invalide` : ce que le type
+//!      `Record<string, unknown>` exige de la colonne `data`.
 //!
 //!    Rien de plus. Aucune fonction n invente de regle qui ne soit pas ecrite
 //!    dans la source.
 //!
-//! ## Noms de champs
+//! ## La question delicate du fichier : `primaryKey()` sans `notNull()`
 //!
-//! Cas exceptionel pour ce portage : les noms de colonnes sont en **snake_case**
-//! (`aggregate_id`, `owner_id`), et non en camelCase. Aucun `#[serde(rename)]`
-//! n est donc requis pour elles. Le seul nom qui pose probleme est `type`, qui
-//! est un mot cle Rust : le champ est appele `event_type` et porte un
+//! C est le seul point sur lequel la source s excuse d elle-meme, et il est
+//! tranche ici. Le code ecrit
+//! `id: text().$type<EventV2.ID>().primaryKey()`, sans `.notNull()` ; sur la
+//! table voisine, `aggregate_id` ecrit les deux. Est-ce que `primaryKey()`
+! implique `NOT NULL` chez Drizzle ?
+//!
+//! **Non, et la question a une reponse empirique dans le depot.** Trois
+//! artefacts produits par le projet lui-meme permettent de trancher :
+//!
+//! 1. Le DDL reellement produit, dans
+//!    `packages/core/src/database/schema.gen.ts` : la table `event` y est
+//!    creee avec `` `id` text PRIMARY KEY ``, **sans** `NOT NULL`. La table
+//!    `event_sequence`, dont la source ecrit pourtant `.notNull().primaryKey()`,
+//!    est creee avec `` `aggregate_id` text PRIMARY KEY ``, egalement sans
+//!    `NOT NULL`. Les deux formes de declaration produisent donc un DDL
+//!    identique : quand Drizzle emet `PRIMARY KEY` sur la colonne, il retire
+//!    le `NOT NULL` juge redondant. Le meme DDL se relit dans la migration
+//!    d origine, `packages/core/src/database/migration/20260323234822_events.ts`.
+//! 2. L instantane de `drizzle-kit`,
+//!    `packages/opencode/migration/20260511173437_session-metadata/snapshot.json`,
+//!    enregistre `"notNull": false` pour `event.id` **et** pour
+//!    `event_sequence.aggregate_id`. Autrement dit, dans le modele interne de
+//!    Drizzle, `notNull()` et `primaryKey()` sont deux drapeaux independants, et
+//!    le second l emporte sur le premier a la generation.
+//! 3. Consequence SQLite, non executee ici faute de pilote sur la machine :
+//!    dans une table a `rowid`, une `PRIMARY KEY` qui n est pas
+//!    `INTEGER PRIMARY KEY` **n implique pas** `NOT NULL`. C est une deviation
+//!    documentee de SQLite, conservee pour compatibilite. Le schema cree par le
+//!    depot autorise donc physiquement `NULL` dans `event.id`, et aussi dans
+//!    `event_sequence.aggregate_id`, malgre le `.notNull()` ecrit dans la
+//!    source.
+//!
+//! Le fichier ne nie rien de cela, et surtout n invente pas la contrainte qui
+//! manque. Il separe les deux questions qui etaient confondues :
+//!
+//! - `ColumnDef::not_null_declares` repond a ce que la **source ecrit**.
+//! - `ColumnDef::admet_null_dans_sqlite` repond a ce que la **base autorise**.
+//!
+//! Ces deux reponses ne different que pour `event.id`, qui passe de `false` a
+//! `true`. Pour `event_sequence.aggregate_id` elles disent la meme chose, et c
+//! est justement le piege : le `true` de la seconde ne vient pas du `notNull()`
+//! ecrit dans la source, il vient du statut de cle primaire. Confondre les deux
+//! questions, dans un sens ou dans l autre, produirait un schema qui ne
+//! correspond ni a la source ni a la base qui tourne deja.
+//!
+//! ## Les deux pieges du projet, sur ce fichier
+//!
+//! **Noms de champs.** Cas exceptionel : les colonnes sont en **snake_case**
+//! (`aggregate_id`, `owner_id`), pas en camelCase, donc aucun
+//! `#[serde(rename)]` n est requis pour elles. Le seul nom qui pose probleme est
+//! `type`, qui est un mot cle Rust : le champ s appelle `event_type` et porte un
 //! `#[serde(rename = "type")]`, qui le fait ressortir sous le nom exact de la
-//! colonne. Ce renommage est donc la seule subtilite du fichier, et le test
-//! `le_champ_type_sort_du_cote_json_sous_le_nom_type` le verrouille.
+//! colonne. Deux tests verrouillent le nom, un pour la colonne, un pour la
+//! ligne entiere.
 //!
-//! Un mot sur la nullabilite, car c est le piege du fichier : `notNull()`
-//! interdit `NULL`, **pas la chaine vide**. Une ligne dont `aggregate_id` vaut
-//! `""` est donc parfaitement recevable, et ce fichier l accepte. Le
-//! comportement inverse, traiter la chaine vide comme un absent, casserait le
-//! portage : c est le piege `?` contre `??` du projet, transpose ici.
+//! **Ternaire contre coalescent.** La source ne contient **ni ternaire ni
+//! coalescent** : vingt-cinq lignes, deux declarations, aucune expression. Le
+//! piege n a donc rien a porter ici, et il serait malhonnete d en inventer un.
+//! Le seul voisin est le chaine vide, qui releve d une autre distinction :
+//! `notNull()` interdit `NULL`, il n interdit pas `""`. Une ligne dont les
+//! chaines sont vides reste donc recevable ici, et n est jamais traitee comme
+//! une absence de valeur.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -144,18 +192,18 @@ pub struct ForeignKey {
 
 /// Une colonne, avec les contraintes declarees autour d elle.
 ///
-/// `nullable` vaut `false` quand la source ecrit `notNull()`, et aussi pour la
-/// colonne qui porte `primaryKey()` : dans Drizzle, sur SQLite, `primaryKey()`
-/// implique NOT NULL. C est le seul implicite assume par ce fichier, la source
-/// n ecrivant pas les deux sur la colonne `id`. Voir le POINT FAIBLE du
-/// rapport de portage.
+/// `nullable` est une **transcription litterale** de la source : il vaut `true`
+/// quand la declaration n ecrit pas `notNull()`, sans interpretation. Il ne faut
+/// pas le lire comme la capacite reelle de la colonne a contenir `NULL`, qui
+/// est une autre question, traitee par `admet_null_dans_sqlite` et exposee dans
+/// la documentation du module.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ColumnDef {
     /// Nom de la colonne, identique a la cle de l objet de la source.
     pub name: &'static str,
     /// Type de stockage.
     pub storage: Storage,
-    /// `true` si la colonne admet `NULL`, c est a dire si `notNull()` manque.
+    /// `true` si la declaration n ecrit pas `notNull()` sur la colonne.
     pub nullable: bool,
     /// `true` si la colonne porte la cle primaire de sa table.
     pub primary_key: bool,
@@ -163,6 +211,35 @@ pub struct ColumnDef {
     pub mode: TextMode,
     /// Cle etrangere eventuelle, portee par `references()`.
     pub references: Option<ForeignKey>,
+}
+
+impl ColumnDef {
+    /// La declaration ecrit-elle `notNull()` sur cette colonne ?
+    ///
+    /// C est la seule question a laquelle la source permet de repondre, et la
+    /// reponse est lue sur le code, pas sur le DDL produit.
+    pub fn not_null_declares(&self) -> bool {
+        !self.nullable
+    }
+
+    /// La colonne peut-elle physiquement contenir `NULL` dans la base creee ?
+    ///
+    /// Trois cas :
+    ///
+    /// - la declaration ecrit `notNull()` : `NULL` est refuse.
+    /// - la declaration n ecrit rien et ne porte pas la cle primaire : `NULL` est
+    ///   admis.
+    /// - la colonne porte la cle primaire : `NULL` est **admis malgre tout**, car
+    ///   le DDL produit par Drizzle n y met pas de `NOT NULL` et que SQLite, dans
+    ///   une table a `rowid`, ne traite pas `PRIMARY KEY` comme `NOT NULL`.
+    ///
+    /// Ce troisieme cas est la raison d etre de cette fonction : il rend visible
+    /// l ecart entre `event.id`, sans `notNull()` dans la source, et
+    /// `event_sequence.aggregate_id`, qui l ecrit et se la fait retirer du DDL
+    /// quand meme.
+    pub fn admet_null_dans_sqlite(&self) -> bool {
+        self.nullable || self.primary_key
+    }
 }
 
 /// Un index declare dans le troisieme argument de `sqliteTable`.
@@ -191,16 +268,46 @@ impl TableDef {
     /// Cherche une colonne par son nom, comme le fait le type de colonne
     /// Drizzle a l usage du schema.
     ///
-    /// La recherche est insensible a la casse ? Non : elle est exacte, comme en
-    /// SQL. Une colonne absente donne `None`.
+    /// La recherche est exacte, comme en SQL : `Owner_Id` ne trouve pas
+    /// `owner_id`. Une colonne absente donne `None`.
     pub fn colonne(&self, nom: &str) -> Option<&'static ColumnDef> {
-        let colonnes: &'static [ColumnDef] = self.columns;
-        colonnes.iter().find(|colonne| colonne.name == nom)
+        self.columns.iter().find(|colonne| colonne.name == nom)
     }
 
     /// Les noms de colonnes, dans l ordre de declaration.
     pub fn noms_de_colonnes(&self) -> Vec<&'static str> {
         self.columns.iter().map(|colonne| colonne.name).collect()
+    }
+
+    /// Colonnes dont la declaration ecrit `notNull()`.
+    pub fn colonnes_avec_not_null_declares(&self) -> Vec<&'static str> {
+        self.columns
+            .iter()
+            .filter(|colonne| colonne.not_null_declares())
+            .map(|colonne| colonne.name)
+            .collect()
+    }
+
+    /// Colonnes dont la declaration n ecrit **pas** `notNull()`.
+    pub fn colonnes_sans_not_null_declares(&self) -> Vec<&'static str> {
+        self.columns
+            .iter()
+            .filter(|colonne| !colonne.not_null_declares())
+            .map(|colonne| colonne.name)
+            .collect()
+    }
+
+    /// Colonnes que la base creee accepterait reellement avec `NULL`.
+    ///
+    /// Cette liste est plus large que la precedente : elle ajoute les colonnes
+    /// qui portent la cle primaire, pour la raison donnee sur
+    /// `ColumnDef::admet_null_dans_sqlite`.
+    pub fn colonnes_admettant_null_dans_sqlite(&self) -> Vec<&'static str> {
+        self.columns
+            .iter()
+            .filter(|colonne| colonne.admet_null_dans_sqlite())
+            .map(|colonne| colonne.name)
+            .collect()
     }
 }
 
@@ -238,13 +345,18 @@ pub const TABLE_EVENT_SEQUENCE: TableDef = TableDef {
 
 /// Table `event` : une ligne par evenement, range par agregat puis par numero
 /// de sequence.
+///
+/// Colonnes, dans l ordre de la source : `id`, `aggregate_id`, `seq`, `type`,
+/// `data`. La colonne `id` porte `primaryKey()` **sans** `notNull()`, d ou un
+/// `nullable: true` litteral alors qu elle est la cle primaire. Voir la
+/// documentation du module pour les trois artefacts du depot qui le prouvent.
 pub const TABLE_EVENT: TableDef = TableDef {
     name: "event",
     columns: &[
         ColumnDef {
             name: "id",
             storage: Storage::Text,
-            nullable: false,
+            nullable: true,
             primary_key: true,
             mode: TextMode::Plain,
             references: None,
@@ -294,6 +406,11 @@ pub const TABLE_EVENT: TableDef = TableDef {
 /// rend la position d un evenement dans son agregat unique. Le second n est pas
 /// unique et ajoute `type` entre les deux : il sert a relire un sous ensemble
 /// d evenements d un type donne, par agregat, dans l ordre du sequence.
+///
+/// Les deux noms et les deux listes de colonnes se relisent dans le DDL genere
+/// du projet, `packages/core/src/database/schema.gen.ts`, qui ecrit
+/// `CREATE UNIQUE INDEX event_aggregate_seq_idx ON event (aggregate_id, seq)`
+/// puis `CREATE INDEX event_aggregate_type_seq_idx ON event (aggregate_id, type, seq)`.
 pub const EVENT_INDEXES: [IndexDef; 2] = [
     IndexDef {
         name: "event_aggregate_seq_idx",
@@ -329,8 +446,14 @@ pub struct SequenceRow {
 /// La forme d une ligne de `event`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EventRow {
-    /// `.$type<EventV2.ID>()` : un identifiant d evenement. Le type exact
-    /// vient du portage de `packages/core/src/event`, il n est pas pose ici.
+    /// `.$type<EventV2.ID>()` : un identifiant d evenement, une chaine marquee
+    /// qui commence par `evt_`. Le type exact vient du portage de
+    /// `packages/schema/src/event.ts`, il n est pas pose ici.
+    ///
+    /// Le champ reste `String` et non `Option<String>` parce que le code
+    /// applicatif ecrit toujours un identifiant, non parce que la colonne
+    /// l interdait : voir `TABLE_EVENT`, ou `id` est justement l une des colonnes
+    /// que la base pourrait laisser a `NULL`.
     pub id: String,
     /// Reference `event_sequence.aggregate_id`, `notNull`.
     pub aggregate_id: String,
@@ -340,7 +463,8 @@ pub struct EventRow {
     #[serde(rename = "type")]
     pub event_type: String,
     /// `text({ mode: "json" }).$type<Record<string, unknown>>()` : un objet
-    /// JSON, donc jamais un simple nombre, jamais un tableau, jamais absent.
+    /// JSON. `serde_json::Value` accepte bien plus que cela, c est
+    /// `positions_avec_donnee_invalide` qui fait tenir le type de la source.
     pub data: serde_json::Value,
 }
 
@@ -451,6 +575,8 @@ mod tests {
 
     /// Un evenement bien forme, pour etre sur que les tests qui portent sur les
     /// contraintes ne testent pas, en meme temps, la forme de la ligne.
+    ///
+    /// `evt_` est le prefixe impose par `packages/schema/src/event.ts`.
     fn evenement(aggregate_id: &str, seq: i64) -> EventRow {
         EventRow {
             id: format!("evt_{}_{}", aggregate_id, seq),
@@ -509,18 +635,76 @@ mod tests {
         assert!(TABLE_EVENT.colonne("inconnue").is_none());
         // Le nom de colonne existe dans l autre table, mais pas dans celle-ci.
         assert!(TABLE_EVENT.colonne("owner_id").is_none());
+        // Et la recherche est exacte, comme en SQL.
+        assert!(TABLE_EVENT_SEQUENCE.colonne("Aggregate_Id").is_none());
     }
 
     #[test]
-    fn la_colonne_owner_id_est_la_seule_du_schema_a_admettre_l_absence_de_valeur() {
-        let nullables: Vec<&str> = TABLE_EVENT
-            .columns
-            .iter()
-            .chain(TABLE_EVENT_SEQUENCE.columns.iter())
-            .filter(|colonne| colonne.nullable)
-            .map(|colonne| colonne.name)
-            .collect();
-        assert_eq!(nullables, vec!["owner_id"]);
+    fn la_seule_colonne_sans_not_null_ecrit_dans_l_evenement_est_son_identifiant() {
+        // Point tranche : `text().$type<EventV2.ID>().primaryKey()` n ecrit pas
+        // `notNull()`, donc la colonne est declaree nullable, meme si elle est
+        // la cle primaire.
+        assert_eq!(
+            TABLE_EVENT.colonnes_sans_not_null_declares(),
+            vec!["id"]
+        );
+        assert_eq!(
+            TABLE_EVENT.colonnes_avec_not_null_declares(),
+            vec!["aggregate_id", "seq", "type", "data"]
+        );
+    }
+
+    #[test]
+    fn la_seule_colonne_sans_not_null_ecrit_dans_le_sequencement_est_son_proprietaire() {
+        assert_eq!(
+            TABLE_EVENT_SEQUENCE.colonnes_sans_not_null_declares(),
+            vec!["owner_id"]
+        );
+        assert_eq!(
+            TABLE_EVENT_SEQUENCE.colonnes_avec_not_null_declares(),
+            vec!["aggregate_id", "seq"]
+        );
+    }
+
+    #[test]
+    fn la_cle_primaire_admet_null_a_la_base_meme_quand_la_source_l_interdit() {
+        // Les deux etats opposes de la source : `id` n ecrit pas `notNull()`,
+        // `aggregate_id` l ecrit. Les deux colonnes sont des cles primaires, et
+        // les deux peuvent physiquement valoir `NULL`, parce que le DDL genere
+        // par Drizzle ne met pas de `NOT NULL` et que SQLite ne traite pas
+        // `PRIMARY KEY` comme `NOT NULL` dans une table a `rowid`.
+        let sans_not_null = TABLE_EVENT.colonne("id").expect("colonne id");
+        let avec_not_null = TABLE_EVENT_SEQUENCE
+            .colonne("aggregate_id")
+            .expect("colonne aggregate_id");
+
+        assert!(!sans_not_null.not_null_declares());
+        assert!(avec_not_null.not_null_declares());
+
+        assert!(sans_not_null.admet_null_dans_sqlite());
+        assert!(avec_not_null.admet_null_dans_sqlite());
+
+        // En revanche une colonne ordinaire et `notNull` refuse vraiment `NULL`.
+        let seq = TABLE_EVENT.colonne("seq").expect("colonne seq");
+        assert!(seq.not_null_declares());
+        assert!(!seq.admet_null_dans_sqlite());
+    }
+
+    #[test]
+    fn les_colonnes_admettant_null_a_la_base_sont_plus_nombreuses_que_cellules_sans_not_null_ecrit() {
+        // Sur `event`, `id` est dans les deux listes, mais pas pour la meme
+        // raison : une fois parce que la source ne l interdit pas, une fois
+        // parce que c est une cle primaire.
+        assert_eq!(
+            TABLE_EVENT.colonnes_admettant_null_dans_sqlite(),
+            vec!["id"]
+        );
+        // Sur `event_sequence`, la cle `aggregate_id` s ajoute : la source ecrit
+        // `notNull()`, mais la base qui tourne ne l applique pas.
+        assert_eq!(
+            TABLE_EVENT_SEQUENCE.colonnes_admettant_null_dans_sqlite(),
+            vec!["aggregate_id", "owner_id"]
+        );
     }
 
     #[test]
@@ -541,6 +725,14 @@ mod tests {
         assert_eq!(
             TABLE_EVENT.colonne("data").expect("colonne data").storage,
             Storage::Text
+        );
+        // Le mode n a de sens que sur du texte.
+        assert_eq!(
+            TABLE_EVENT_SEQUENCE
+                .colonne("owner_id")
+                .expect("colonne owner_id")
+                .mode,
+            TextMode::Plain
         );
     }
 
@@ -569,9 +761,12 @@ mod tests {
 
     #[test]
     fn les_deux_index_ne_portent_pas_sur_les_memes_colonnes_et_l_unique_est_le_premier() {
+        // Les colonnes sont comparees comme tranches, avec `[..]` : la colonne
+        // du portage est un `&[&str]`, et la comparaison se fait donc sur un
+        // type identique des deux cotes.
         assert!(EVENT_INDEXES[0].unique, "le premier index est le unique");
         assert_eq!(EVENT_INDEXES[0].name, "event_aggregate_seq_idx");
-        assert_eq!(EVENT_INDEXES[0].columns, &["aggregate_id", "seq"]);
+        assert_eq!(EVENT_INDEXES[0].columns, &["aggregate_id", "seq"][..]);
 
         assert!(
             !EVENT_INDEXES[1].unique,
@@ -580,7 +775,7 @@ mod tests {
         assert_eq!(EVENT_INDEXES[1].name, "event_aggregate_type_seq_idx");
         assert_eq!(
             EVENT_INDEXES[1].columns,
-            &["aggregate_id", "type", "seq"]
+            &["aggregate_id", "type", "seq"][..]
         );
 
         assert_ne!(
@@ -590,9 +785,26 @@ mod tests {
     }
 
     #[test]
+    fn chaque_index_ne_cible_que_des_colonnes_qui_existent_dans_la_table_event() {
+        for index in EVENT_INDEXES.iter() {
+            for &nom in index.columns {
+                assert!(
+                    TABLE_EVENT.colonne(nom).is_some(),
+                    "l index {} cite une colonne absente : {}",
+                    index.name,
+                    nom
+                );
+            }
+        }
+    }
+
+    #[test]
     fn l_index_unique_interdit_deux_evenements_de_meme_agregat_et_de_meme_numero() {
         let evenements = vec![evenement("ses_1", 1), evenement("ses_1", 1)];
-        assert_eq!(conflits_de_sequence(&evenements), vec![("ses_1".to_string(), 1)]);
+        assert_eq!(
+            conflits_de_sequence(&evenements),
+            vec![("ses_1".to_string(), 1)]
+        );
     }
 
     #[test]
@@ -649,6 +861,19 @@ mod tests {
     }
 
     #[test]
+    fn deux_evenements_du_meme_agregat_inconnu_ne_donnent_qu_un_seul_orphelin() {
+        let evenements = vec![
+            evenement("ses_9", 1),
+            evenement("ses_9", 2),
+            evenement("ses_8", 1),
+        ];
+        assert_eq!(
+            agregats_orphelins(&evenements, &[]),
+            vec!["ses_8".to_string(), "ses_9".to_string()]
+        );
+    }
+
+    #[test]
     fn une_sequence_sans_evenement_est_lisible_mais_n_est_pas_une_erreur() {
         // La cle etrangere va de `event` vers `event_sequence` : une table mere
         // vide reste valide, et rien ici ne doit la signaler comme un conflit.
@@ -659,6 +884,7 @@ mod tests {
             vec!["ses_2".to_string()]
         );
         assert!(conflits_de_sequence(&evenements).is_empty());
+        assert!(agregats_orphelins(&evenements, &sequences).is_empty());
     }
 
     #[test]
@@ -715,8 +941,9 @@ mod tests {
 
     #[test]
     fn une_chaine_vide_reste_valide_car_l_absence_de_valeur_est_interdite_mais_pas_la_chaine_vide() {
-        // Piege `notNull` contre chaine vide. En SQL, `not null` interdit `NULL`,
-        // il n interdit pas `""`. Une ligne dont les identifiants sont vides
+        // La source ne contient aucun ternaire ni coalescent : la seule question
+        // voisine est `notNull` contre chaine vide. En SQL, `not null` interdit
+        // `NULL`, il n interdit pas `""`. Une ligne dont les chaines sont vides
         // reste donc acceptable ici, et surtout pas traitee comme un absent.
         let evenement = EventRow {
             id: String::new(),
@@ -758,6 +985,38 @@ mod tests {
     }
 
     #[test]
+    fn les_deux_lignes_serialisees_n_exposent_exactement_les_noms_de_leurs_colonnes() {
+        // Verrou de toutes les entrees, pas seulement du champ problematic :
+        // les cinq colonnes de `event` et les trois de `event_sequence`, sous
+        // leur nom de colonne exact, et rien d autre.
+        //
+        // Les cles sont triees avant comparaison : `serde_json` peut servir les
+        // objets dans l ordre des champs ou dans l ordre alphabetique selon les
+        // drapeaux actives, et cet ordre ne doit pas rendre le test faux.
+        let evenement = evenement("ses_1", 1);
+        let json = serde_json::to_value(&evenement).expect("serialisation");
+        let mut cles: Vec<&str> = json
+            .as_object()
+            .expect("objet")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        cles.sort();
+        assert_eq!(cles, vec!["aggregate_id", "data", "id", "seq", "type"]);
+
+        let sequence = sequence("ses_1", 3);
+        let json = serde_json::to_value(&sequence).expect("serialisation");
+        let mut cles: Vec<&str> = json
+            .as_object()
+            .expect("objet")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        cles.sort();
+        assert_eq!(cles, vec!["aggregate_id", "owner_id", "seq"]);
+    }
+
+    #[test]
     fn un_owner_id_absent_disparait_du_json_au_lieu_de_devenir_null() {
         let sans_proprietaire = SequenceRow {
             aggregate_id: "ses_1".to_string(),
@@ -770,5 +1029,21 @@ mod tests {
         let avec_proprietaire = sequence("ses_1", 3);
         let json = serde_json::to_string(&avec_proprietaire).expect("serialisation");
         assert_eq!(json, "{\"aggregate_id\":\"ses_1\",\"seq\":3,\"owner_id\":\"own_1\"}");
+    }
+
+    #[test]
+    fn un_owner_id_vide_survit_a_la_serialization_et_ne_devient_pas_absent() {
+        // Le coalescent `??` teste la nullite : une chaine vide n est pas un
+        // absent. Ce n est pas un ternaire, donc `skip_serializing_if` ne doit
+        // pas la transformer en champ manquant.
+        let ligne = SequenceRow {
+            aggregate_id: "ses_1".to_string(),
+            seq: 3,
+            owner_id: Some(String::new()),
+        };
+        let json = serde_json::to_value(&ligne).expect("serialisation");
+        let vide = serde_json::json!("");
+        assert_eq!(json.get("owner_id"), Some(&vide));
+        assert!(json.get("owner_id").is_some());
     }
 }
