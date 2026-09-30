@@ -56,8 +56,17 @@ jobs:
       - name: Compiler les tests
         run: cargo test --no-run --target ${{ matrix.target }}
 
-      - name: Lancer les tests run_coordinator
-        run: cargo test --target ${{ matrix.target }} core::session::run_coordinator
+      - name: Test coordinator simple
+        run: cargo test --target ${{ matrix.target }} -- --exact core::session::run_coordinator::tests::execution_simple_sans_concurrence
+
+      - name: Test coordinator wake coalesce
+        run: cargo test --target ${{ matrix.target }} -- --exact core::session::run_coordinator::tests::wake_coalesce_plusieurs_wakes_en_un_seul_successeur
+
+      - name: Test coordinator wake pendant execution
+        run: cargo test --target ${{ matrix.target }} -- --exact core::session::run_coordinator::tests::wake_pendant_execution_planifie_un_successeur
+
+      - name: Test coordinator cles differentes
+        run: cargo test --target ${{ matrix.target }} -- --exact core::session::run_coordinator::tests::cles_differentes_s_executent_concurremment
 
       - name: Lancer les autres tests
         run: cargo test --target ${{ matrix.target }} -- --skip core::session::run_coordinator
