@@ -1,19 +1,17 @@
-//! Conversion des messages de session vers le format attendu par un provider,
-//! d'apres `opencode/packages/core/src/session/runner/to-llm-message.ts`.
+//! Conversion of session messages into the format a provider expects, after
+//! `opencode/packages/core/src/session/runner/to-llm-message.ts`.
 //!
-//! C'est l'adaptateur entre le modele de donnees riche d'OpenCode et le format
-//! simple qu'un provider comprend. Deux subtilites la rendent delicate.
+//! This is the adapter between OpenCode's rich data model and the simple
+//! format a provider understands. Two subtleties make it delicate.
 //!
-//! **Les metadonnees de provider ne sont reutilisees que pour le meme modele.**
-//! Elles servent au cache et a la reprise de raisonnement chez un provider
-//! donne. Les renvoyer a un autre provider produit des erreurs de cache
-//! silencieuses, qui apparaissent bien plus tard, sans lien apparent avec leur
-//! cause. D'ou la comparaison `sameModel`.
+//! **Provider metadata is reused only for the same model.** It serves caching
+//! and reasoning resumption at a given provider. Sending it to another provider
+//! produces silent cache errors, which surface much later, with no apparent
+//! link to their cause. Hence the `sameModel` comparison.
 //!
-//! **Le raisonnement d'un autre modele devient du texte.** On ne peut pas
-//! renvoyer un raisonnement etrange chez un provider qui ne l'a pas produit :
-//! il degrade le texte ordinaire, ce qui est la seule chose que le nouveau modele
-//! peut comprendre.
+//! **Another model's reasoning becomes text.** Foreign reasoning cannot be sent
+//! back to a provider that did not produce it: it degrades ordinary text, the
+//! only thing the new model can understand.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -22,7 +20,7 @@ use crate::schema::session_message::{
     AssistantContent, AssistantTool, Message, ModelRef, ToolState, User,
 };
 
-/// Partie de contenu telle qu'un provider la comprend.
+/// Content part as a provider understands it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum ContentPart {
@@ -35,12 +33,18 @@ pub enum ContentPart {
         data: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         filename: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        metadata: Option<Value>,
     },
     Reasoning {
         text: String,
         #[serde(rename = "providerMetadata", skip_serializing_if = "Option::is_none")]
         provider_metadata: Option<Value>,
     },
+    // The two tags below are kebab-case in the TS (`tool-call`,
+    // `tool-result`): `rename_all = "lowercase"` would emit `toolcall`,
+    // which no protocol recognizes.
+    #[serde(rename = "tool-call")]
     ToolCall {
         id: String,
         name: String,
@@ -50,12 +54,11 @@ pub enum ContentPart {
         #[serde(rename = "providerMetadata", skip_serializing_if = "Option::is_none")]
         provider_metadata: Option<Value>,
     },
+    #[serde(rename = "tool-result")]
     ToolResult {
         id: String,
         name: String,
-        result: Value,
-        #[serde(rename = "resultType", skip_serializing_if = "Option::is_none")]
-        result_type: Option<String>,
+        result: ToolResultValue,
         #[serde(rename = "providerExecuted", skip_serializing_if = "Option::is_none")]
         provider_executed: Option<bool>,
         #[serde(rename = "providerMetadata", skip_serializing_if = "Option::is_none")]
@@ -63,7 +66,19 @@ pub enum ContentPart {
     },
 }
 
-/// Role d'un message envoye au provider.
+/// A tool result value, as the TS defines `ToolResultValue`: a tagged union
+/// `{type, value}`. The TS never stores a raw result in `result`:
+/// `ToolResultPart.make` wraps any value that is not already in this shape.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum ToolResultValue {
+    Json { value: Value },
+    Text { value: Value },
+    Error { value: Value },
+    Content { value: Value },
+}
+
+/// Role of a message sent to the provider.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Role {
@@ -73,17 +88,22 @@ pub enum Role {
     Tool,
 }
 
-/// Message envoye au provider.
+/// Message sent to the provider.
+///
+/// `id` is optional: the TS defines none on `system` messages
+/// (`Message.system`) nor on tool messages (`Message.tool`). Sending the call
+/// id there would be a visible divergence on the wire.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LlmMessage {
-    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
     pub role: Role,
     pub content: Vec<ContentPart>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Value>,
 }
 
-/// Fichier joint a un message utilisateur.
+/// File attached to a user message.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MediaFile {
     #[serde(rename = "mediaType")]
@@ -101,22 +121,25 @@ impl MediaFile {
             media_type: self.mime.clone(),
             data: self.data.clone(),
             filename: self.filename.clone(),
+            // The description travels in `metadata.description`, exactly as
+            // the TS `media()` does it: MediaPart has no `description` field.
+            metadata: self.description.as_ref().map(|d| serde_json::json!({ "description": d })),
         }
     }
 }
 
-/// Le provider cible, pour la comparaison de modele.
+/// The target provider, for model comparison.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TargetModel {
     pub provider: String,
     pub id: String,
 }
 
-/// Parametres d'entree de l'appel de l'outil.
+/// Entry parameters of the tool call.
 ///
-/// L'original parse le JSON stocke en `pending` et le renvoie tel quel en cas
-/// d'echec. On reproduit : un JSON invalide n'est pas une raison de perdre
-/// l'appel, il faut le transmettre brut pour que le modele puisse le corriger.
+/// The original parses the JSON stored in `pending` and returns it as-is on
+/// failure. We reproduce that: invalid JSON is no reason to lose the call; it
+/// must be forwarded raw so the model can correct it itself.
 pub fn tool_input(tool: &AssistantTool) -> Value {
     match &tool.state {
         ToolState::Pending { input } => serde_json::from_str(input).unwrap_or_else(|_| Value::String(input.clone())),
@@ -126,7 +149,7 @@ pub fn tool_input(tool: &AssistantTool) -> Value {
     }
 }
 
-/// Partie d'appel d'outil.
+/// Tool call part.
 pub fn tool_call(tool: &AssistantTool, provider_metadata: Option<Value>) -> ContentPart {
     ContentPart::ToolCall {
         id: tool.id.clone(),
@@ -137,84 +160,106 @@ pub fn tool_call(tool: &AssistantTool, provider_metadata: Option<Value>) -> Cont
     }
 }
 
-/// Partie de resultat d'un outil.
+/// Tool result part.
 ///
-/// `None` si l'appel n'est pas encore termine : un appel en cours n'a pas de
-/// resultat, et en envoyer un vaudrait `null` que le modele interpreterait
-/// comme un echec.
+/// `None` when the call has not finished: a running call has no result, and
+/// sending one would be a `null` the model would read as a failure.
 pub fn tool_result(tool: &AssistantTool, provider_metadata: Option<Value>) -> Option<ContentPart> {
+    // The TS tests `provider?.executed === true && state.result !== undefined`:
+    // an executed tool WITHOUT a result falls back to local computation, not
+    // to null.
     let executed = tool.provider.as_ref().map(|p| p.executed).unwrap_or(false);
 
     match &tool.state {
         ToolState::Completed { structured, content, result, .. } => {
-            // Un outil execute par le provider a deja produit son resultat
-            // canonique : on ne le recalcule pas.
-            let value = if executed {
-                result.clone().unwrap_or(Value::Null)
-            } else {
-                result_value(structured, content)
+            let value = match result {
+                Some(r) if executed => make_result_value(r.clone(), "json"),
+                _ => to_result_value(structured, content),
             };
             Some(ContentPart::ToolResult {
                 id: tool.id.clone(),
                 name: tool.name.clone(),
                 result: value,
-                result_type: None,
-                provider_executed: Some(executed),
+                provider_executed: tool.provider.as_ref().map(|p| p.executed),
                 provider_metadata,
             })
         }
         ToolState::Error { structured, content, error, result, .. } => {
-            let value = if executed {
-                result.clone().unwrap_or(Value::Null)
-            } else {
-                serde_json::json!({
-                    "error": error,
-                    "content": content,
-                    "structured": structured,
-                })
+            let value = match result {
+                Some(r) if executed => make_result_value(r.clone(), "error"),
+                _ => make_result_value(
+                    serde_json::json!({
+                        "error": error,
+                        "content": content,
+                        "structured": structured,
+                    }),
+                    "error",
+                ),
             };
             Some(ContentPart::ToolResult {
                 id: tool.id.clone(),
                 name: tool.name.clone(),
                 result: value,
-                result_type: Some("error".to_string()),
-                provider_executed: Some(executed),
+                provider_executed: tool.provider.as_ref().map(|p| p.executed),
                 provider_metadata,
             })
         }
-        // En attente ou en cours : pas de resultat.
+        // Pending or running: no result.
         ToolState::Pending { .. } | ToolState::Running { .. } => None,
     }
 }
 
-/// Valeur de resultat d'un outil execute localement.
-fn result_value(structured: &Value, content: &[crate::schema::session_message::ToolContent]) -> Value {
-    if !structured.is_null() {
-        return structured.clone();
+/// Port of the TS `ToolResultValue.make`.
+///
+/// A value already shaped `{type, value}` passes through unchanged; otherwise
+/// it is wrapped with the given hint. Special case `content`: the TS only
+/// accepts an array, any other value becomes `[]`.
+fn make_result_value(value: Value, hint: &str) -> ToolResultValue {
+    // `isToolResultValue`: object, tag in the union, `value` key present.
+    if let Some(obj) = value.as_object() {
+        let tag = obj.get("type").and_then(Value::as_str);
+        if matches!(tag, Some("json" | "text" | "error" | "content")) && obj.contains_key("value") {
+            if let Ok(already) = serde_json::from_value::<ToolResultValue>(value.clone()) {
+                return already;
+            }
+        }
     }
-    let texts: Vec<String> = content
-        .iter()
-        .filter_map(|c| match c {
-            crate::schema::session_message::ToolContent::Text { text } => Some(text.clone()),
-            _ => None,
-        })
-        .collect();
-    if texts.len() == 1 {
-        Value::String(texts.into_iter().next().unwrap())
-    } else {
-        Value::Array(texts.into_iter().map(Value::String).collect())
+    match hint {
+        "text" => ToolResultValue::Text { value },
+        "error" => ToolResultValue::Error { value },
+        "content" if value.is_array() => ToolResultValue::Content { value },
+        "content" => ToolResultValue::Content { value: Value::Array(Vec::new()) },
+        _ => ToolResultValue::Json { value },
     }
 }
 
-/// Une partie est-elle porteuse de sens ?
+/// Port of the TS `ToolOutput.toResultValue`.
 ///
-/// Le filtrage evite d'envoyer un raisonnement vide ou un texte vide : un
-/// provider peut les refuser, ou pire les compter comme du contexte inutile.
+/// Order matters: content decides, not `structured`. Empty content yields the
+/// raw structured value; a single text yields `{type: "text"}`; the rest
+/// yields the content array as-is.
+fn to_result_value(structured: &Value, content: &[crate::schema::session_message::ToolContent]) -> ToolResultValue {
+    if content.is_empty() {
+        return ToolResultValue::Json { value: structured.clone() };
+    }
+    if content.len() == 1 {
+        if let crate::schema::session_message::ToolContent::Text { text } = &content[0] {
+            return ToolResultValue::Text { value: Value::String(text.clone()) };
+        }
+    }
+    let raw = serde_json::to_value(content).unwrap_or(Value::Null);
+    ToolResultValue::Content { value: raw }
+}
+
+/// Is a part meaningful?
+///
+/// The filter avoids sending empty reasoning or empty text: a provider may
+/// reject them, or worse, count them as useless context.
 fn is_meaningful(part: &ContentPart) -> bool {
     match part {
         ContentPart::Text { text } => !text.is_empty(),
         ContentPart::Reasoning { text, provider_metadata } => {
-            // `as_ref` : on inspecte la reference, on ne la consomme pas.
+            // `as_ref`: we inspect the reference, we do not consume it.
             !text.is_empty()
                 || provider_metadata
                     .as_ref()
@@ -225,61 +270,71 @@ fn is_meaningful(part: &ContentPart) -> bool {
     }
 }
 
-/// Convertit un message de session en messages pour le provider.
+/// Converts a session message into provider messages.
 ///
-/// Un message produit **zero, un ou plusieurs** messages : un message assistant
-/// suivi de resultats d'outils donne un message principal plus un message par
-/// resultat. Une fonction qui renvoyait un seul message perdrait ces resultats.
+/// One session message produces **zero, one or several** messages: an
+/// assistant message followed by tool results gives a main message plus one
+/// message per result. A function returning a single message would lose those
+/// results.
 pub fn to_llm_messages(message: &Message, target: &TargetModel) -> Vec<LlmMessage> {
     match message {
-        // Un changement d'agent ou de modele n'est pas un message : c'est une
-        // metadonnee de session. Le renvoyer au provider le ferait halluciner
-        // un tour.
+        // An agent or model switch is not a message: it is session metadata.
+        // Forwarding it would make the provider hallucinate a turn.
         Message::AgentSwitched(_) | Message::ModelSwitched(_) => vec![],
 
         Message::User(User { base, prompt, .. }) => {
             let mut content = vec![ContentPart::Text { text: prompt.text.clone() }];
             for file in &prompt.files {
+                // TS `media()`: data carries the URI, filename the name, and
+                // the description goes into metadata.description.
                 content.push(MediaFile {
                     mime: file.mime.clone(),
-                    data: String::new(),
-                    filename: None,
-                    description: None,
+                    data: file.uri.clone(),
+                    filename: file.name.clone(),
+                    description: file.description.clone(),
                 }
                 .to_part());
             }
-            let mut metadata = base.metadata.clone();
+            // The TS spreads metadata: the result is an object, even when
+            // there is nothing to put in it.
+            let mut merged = match &base.metadata {
+                Some(Value::Object(o)) => o.clone(),
+                _ => serde_json::Map::new(),
+            };
             if !prompt.agents.is_empty() {
-                let mut m = metadata.unwrap_or_else(|| Value::Object(Default::default()));
-                if let Some(obj) = m.as_object_mut() {
-                    obj.insert("agents".to_string(), serde_json::json!(prompt.agents));
-                }
-                metadata = Some(m);
+                merged.insert("agents".to_string(), serde_json::json!(prompt.agents));
             }
-            vec![LlmMessage { id: base.id.clone(), role: Role::User, content, metadata }]
+            vec![LlmMessage {
+                id: Some(base.id.clone()),
+                role: Role::User,
+                content,
+                metadata: Some(Value::Object(merged)),
+            }]
         }
 
         Message::Synthetic(s) => vec![LlmMessage {
-            id: s.base.id.clone(),
+            id: Some(s.base.id.clone()),
             role: Role::User,
             content: vec![ContentPart::Text { text: s.text.clone() }],
             metadata: s.base.metadata.clone(),
         }],
 
+        // `Message.system(text)` in the TS carries neither id nor metadata:
+        // both stay undefined on that message.
         Message::System(s) => vec![LlmMessage {
-            id: s.base.id.clone(),
+            id: None,
             role: Role::System,
             content: vec![ContentPart::Text { text: s.text.clone() }],
-            metadata: s.base.metadata.clone(),
+            metadata: None,
         }],
 
         Message::Assistant(a) => {
-            // `a.model` est un `ModelRef` canonique `{id, providerID, variant?}`.
-            // `target` est le struct local `TargetModel { provider, id }`, dont les
-            // noms n'ont pas ete migres. D'ou le melange apparent des deux formes.
+            // `a.model` is a canonical `ModelRef` `{id, providerID, variant?}`.
+            // `target` is the local struct `TargetModel { provider, id }`,
+            // whose names were not migrated. Hence the apparent mix of forms.
             let same_model = a.model.provider_id == target.provider && a.model.id == target.id;
-            // Une erreur invalide les metadonnees : elles decrivent un appel qui
-            // n'a pas abouti, les reutiliser ferait Echouer la reprise.
+            // An error invalidates the metadata: it describes a call that did
+            // not succeed; reusing it would break resumption.
             let reuse = same_model && a.error.is_none();
 
             let mut content = Vec::new();
@@ -293,9 +348,8 @@ pub fn to_llm_messages(message: &Message, target: &TargetModel) -> Vec<LlmMessag
                                 provider_metadata: if reuse { provider_metadata.clone() } else { None },
                             });
                         } else if !text.is_empty() {
-                            // Un raisonnement produit ailleurs devient du texte
-                            // ordinaire : c'est la seule forme que l autre modele
-                            // sait traiter.
+                            // Another model's reasoning becomes plain text:
+                            // the only form the new model can process.
                             content.push(ContentPart::Text { text: text.clone() });
                         }
                     }
@@ -319,9 +373,9 @@ pub fn to_llm_messages(message: &Message, target: &TargetModel) -> Vec<LlmMessag
 
             let meaningful: Vec<ContentPart> = content.into_iter().filter(is_meaningful).collect();
 
-            // Les resultats d'outils **non** executes par le provider deviennent
-            // des messages distincts : le provider n'a pas d'entree pour un
-            // resultat qu'il n'a pas produit lui-meme.
+            // Tool results NOT executed by the provider become separate
+            // messages: the provider has no slot for a result it did not
+            // produce itself.
             let results: Vec<LlmMessage> = a
                 .content
                 .iter()
@@ -333,7 +387,9 @@ pub fn to_llm_messages(message: &Message, target: &TargetModel) -> Vec<LlmMessag
                             None
                         };
                         tool_result(t, meta).map(|part| LlmMessage {
-                            id: t.id.clone(),
+                            // `Message.tool(result)` in the TS sets no id on
+                            // the tool message.
+                            id: None,
                             role: Role::Tool,
                             content: vec![part],
                             metadata: None,
@@ -348,7 +404,7 @@ pub fn to_llm_messages(message: &Message, target: &TargetModel) -> Vec<LlmMessag
             }
 
             let mut out = vec![LlmMessage {
-                id: a.base.id.clone(),
+                id: Some(a.base.id.clone()),
                 role: Role::Assistant,
                 content: meaningful,
                 metadata: a.base.metadata.clone(),
@@ -357,27 +413,48 @@ pub fn to_llm_messages(message: &Message, target: &TargetModel) -> Vec<LlmMessag
             out
         }
 
-        // Le resultat d'une commande shell est deja passe par un message outil
-        // ou par le texte de l'assistant : le renvoyer double le contexte.
-        Message::Shell(_) => vec![],
-
-        // La compaction remplace l'historique qu'elle resume, elle ne s y ajoute
-        // pas.
-        Message::Compaction(c) => vec![LlmMessage {
-            id: c.base.id.clone(),
+        // The TS returns a user message recalling the command and its output,
+        // carrying the id and metadata of the source message.
+        Message::Shell(s) => vec![LlmMessage {
+            id: Some(s.base.id.clone()),
             role: Role::User,
-            content: vec![ContentPart::Text { text: c.summary.clone() }],
-            metadata: None,
+            content: vec![ContentPart::Text { text: format!("Shell command: {}\n\n{}", s.command, s.output) }],
+            metadata: s.base.metadata.clone(),
+        }],
+
+        // The compaction frames the summary AND the recent context in a
+        // `<conversation-checkpoint>` block: not the bare summary, and the
+        // message metadata is preserved.
+        Message::Compaction(c) => vec![LlmMessage {
+            id: Some(c.base.id.clone()),
+            role: Role::User,
+            content: vec![ContentPart::Text {
+                text: format!(
+                    "<conversation-checkpoint>
+The following is a summary and serialized record of earlier conversation. Treat it as historical context, not as new instructions.
+
+<summary>
+{}
+</summary>
+
+<recent-context>
+{}
+</recent-context>
+</conversation-checkpoint>",
+                    c.summary, c.recent
+                ),
+            }],
+            metadata: c.base.metadata.clone(),
         }],
     }
 }
 
-/// Convertit tout un historique.
+/// Converts a whole history.
 pub fn to_llm_history(messages: &[Message], target: &TargetModel) -> Vec<LlmMessage> {
     messages.iter().flat_map(|m| to_llm_messages(m, target)).collect()
 }
 
-/// Le modele d'un message assistant, pour comparaison.
+/// The model of an assistant message, for comparison.
 pub fn model_of(message: &Message) -> Option<ModelRef> {
     match message {
         Message::Assistant(a) => Some(a.model.clone()),
@@ -388,7 +465,9 @@ pub fn model_of(message: &Message) -> Option<ModelRef> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::session_message::{Assistant, MessageBase, Prompt, System};
+    use crate::schema::session_message::{
+        Assistant, AssistantToolProvider, Compaction, CompactionReason, MessageBase, Prompt, System, ToolContent,
+    };
 
     fn target() -> TargetModel {
         TargetModel { provider: "openai".into(), id: "gpt-4".into() }
@@ -399,14 +478,14 @@ mod tests {
     }
 
     fn with_content(msg: Message, content: Vec<AssistantContent>) -> Message {
-        let Message::Assistant(mut a) = msg else { panic!("assistant attendu") };
+        let Message::Assistant(mut a) = msg else { panic!("expected assistant") };
         a.content = content;
         Message::Assistant(a)
     }
 
     #[test]
-    fn un_changement_de_modele_ne_produit_aucun_message() {
-        // L'envoyer ferait compter un tour fantome au provider.
+    fn a_model_switch_produces_no_message() {
+        // Forwarding it would make the provider count a phantom turn.
         let msg = Message::ModelSwitched(crate::schema::session_message::ModelSwitched {
             base: MessageBase::new("msg_1", 1),
             model: ModelRef::new("claude", "anthropic"),
@@ -415,9 +494,9 @@ mod tests {
     }
 
     #[test]
-    fn le_raisonnement_passe_a_un_autre_modele_devient_du_texte() {
-        // Un raisonnement etrange chez un autre provider provoque des erreurs
-        // de cache sans cause apparente.
+    fn reasoning_from_another_model_becomes_text() {
+        // Foreign reasoning at another provider causes cache errors with no
+        // apparent cause.
         let msg = with_content(
             assistant_msg("anthropic", "claude"),
             vec![AssistantContent::Reasoning {
@@ -428,11 +507,11 @@ mod tests {
             }],
         );
         let out = to_llm_messages(&msg, &target());
-        assert!(matches!(out[0].content[0], ContentPart::Text { .. }), "degrade en texte");
+        assert!(matches!(out[0].content[0], ContentPart::Text { .. }), "degraded to text");
     }
 
     #[test]
-    fn le_raisonnement_du_meme_modele_garde_ses_metadonnees() {
+    fn reasoning_from_same_model_keeps_its_metadata() {
         let meta = serde_json::json!({"cache": "x"});
         let msg = with_content(
             assistant_msg("openai", "gpt-4"),
@@ -446,14 +525,14 @@ mod tests {
         let out = to_llm_messages(&msg, &target());
         match &out[0].content[0] {
             ContentPart::Reasoning { provider_metadata, .. } => {
-                assert_eq!(provider_metadata, &Some(meta), "les metadonnees sont conservees");
+                assert_eq!(provider_metadata, &Some(meta), "metadata is preserved");
             }
-            other => panic!("attendu Reasoning, obtenu {other:?}"),
+            other => panic!("expected Reasoning, got {other:?}"),
         }
     }
 
     #[test]
-    fn une_erreur_invalide_la_reutilisation_des_metadonnees() {
+    fn an_error_invalidates_metadata_reuse() {
         let meta = serde_json::json!({"cache": "x"});
         let mut a = Assistant::new("msg_1", 1, "build", ModelRef::new("gpt-4", "openai"));
         a.error = Some(crate::schema::session_message::UnknownError::new("boom"));
@@ -466,14 +545,14 @@ mod tests {
         let out = to_llm_messages(&Message::Assistant(a), &target());
         match &out[0].content[0] {
             ContentPart::Reasoning { provider_metadata, .. } => {
-                assert!(provider_metadata.is_none(), "un appel en echec ne se reprend pas");
+                assert!(provider_metadata.is_none(), "a failed call is not resumed");
             }
-            other => panic!("attendu Reasoning, obtenu {other:?}"),
+            other => panic!("expected Reasoning, got {other:?}"),
         }
     }
 
     #[test]
-    fn un_raisonnement_vide_est_filtre() {
+    fn empty_reasoning_is_filtered_out() {
         let msg = with_content(
             assistant_msg("openai", "gpt-4"),
             vec![AssistantContent::Reasoning { id: "r1".into(), text: String::new(), provider_metadata: None, time: None }],
@@ -482,36 +561,75 @@ mod tests {
     }
 
     #[test]
-    fn un_shell_ne_produit_aucun_message() {
+    fn a_shell_message_produces_a_user_message() {
+        // The TS returns a user message `Shell command: ...` carrying the id
+        // and metadata of the source message: returning zero messages lost
+        // the command trace from the history sent to the provider.
         let msg = Message::Shell(crate::schema::session_message::Shell::new("msg_1", "c1", "ls", "a", 1));
-        assert!(to_llm_messages(&msg, &target()).is_empty());
+        let out = to_llm_messages(&msg, &target());
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].role, Role::User);
+        assert_eq!(out[0].id.as_deref(), Some("msg_1"));
+        match &out[0].content[0] {
+            ContentPart::Text { text } => assert_eq!(text, "Shell command: ls\n\na"),
+            other => panic!("expected Text, got {other:?}"),
+        }
     }
 
     #[test]
-    fn un_message_utilisateur_porte_son_texte_et_ses_fichiers() {
+    fn a_user_message_carries_its_text_and_files() {
         let msg = Message::User(User {
             base: MessageBase::new("msg_1", 1),
             prompt: Prompt {
                 text: "que vois-tu ?".into(),
-                files: vec![crate::schema::session_message::FileAttachment { path: "a.png".into(), mime: Some("image/png".into()) }],
+                files: vec![crate::schema::session_message::FileAttachment {
+                    uri: "file:///a.png".into(),
+                    mime: Some("image/png".into()),
+                    name: Some("a.png".into()),
+                    description: Some("une image".into()),
+                }],
                 agents: vec![],
             },
         });
         let out = to_llm_messages(&msg, &target());
         assert_eq!(out.len(), 1);
         assert!(matches!(&out[0].content[0], ContentPart::Text { text } if text == "que vois-tu ?"));
-        assert!(matches!(&out[0].content[1], ContentPart::Media { media_type, .. } if media_type.as_deref() == Some("image/png")));
+        match &out[0].content[1] {
+            ContentPart::Media { media_type, data, filename, metadata } => {
+                assert_eq!(media_type.as_deref(), Some("image/png"));
+                // `data` carries the URI, not a filesystem path.
+                assert_eq!(data, "file:///a.png");
+                assert_eq!(filename.as_deref(), Some("a.png"));
+                assert_eq!(metadata, &Some(serde_json::json!({ "description": "une image" })));
+            }
+            other => panic!("expected Media, got {other:?}"),
+        }
+        // The TS spreads metadata: the result is always an object, even empty.
+        assert_eq!(out[0].metadata, Some(serde_json::json!({})));
     }
 
     #[test]
-    fn un_systeme_passe_en_role_systeme() {
+    fn agents_are_merged_into_user_metadata() {
+        let msg = Message::User(User {
+            base: MessageBase::new("msg_1", 1),
+            prompt: Prompt { text: "salut".into(), files: vec![], agents: vec!["builder".into()] },
+        });
+        let out = to_llm_messages(&msg, &target());
+        assert_eq!(out[0].metadata, Some(serde_json::json!({ "agents": ["builder"] })));
+    }
+
+    #[test]
+    fn a_system_message_has_role_system_but_no_id_nor_metadata() {
+        // `Message.system(text)` in the TS sets neither id nor metadata.
         let msg = Message::System(System { base: MessageBase::new("msg_1", 1), text: "regle".into() });
         let out = to_llm_messages(&msg, &target());
         assert_eq!(out[0].role, Role::System);
+        assert!(out[0].id.is_none(), "Message.system carries no id");
+        assert!(out[0].metadata.is_none(), "Message.system carries no metadata");
     }
 
     #[test]
-    fn un_outil_en_attente_na_pas_de_resultat() {
+    fn a_pending_tool_has_no_result() {
         let mut a = Assistant::new("msg_1", 1, "build", ModelRef::new("gpt-4", "openai"));
         a.content.push(AssistantContent::Tool(AssistantTool {
             id: "call_1".into(),
@@ -526,13 +644,13 @@ mod tests {
             },
         }));
         let out = to_llm_messages(&Message::Assistant(a), &target());
-        // Un seul message : l'appel, sans resultat.
+        // One message only: the call, without a result.
         assert_eq!(out.len(), 1);
         assert!(matches!(&out[0].content[0], ContentPart::ToolCall { .. }));
     }
 
     #[test]
-    fn un_outil_local_genere_un_message_outil_separe() {
+    fn a_local_tool_generates_a_separate_tool_message() {
         let mut a = Assistant::new("msg_1", 1, "build", ModelRef::new("gpt-4", "openai"));
         a.content.push(AssistantContent::Tool(AssistantTool {
             id: "call_1".into(),
@@ -554,15 +672,24 @@ mod tests {
             },
         }));
         let out = to_llm_messages(&Message::Assistant(a), &target());
-        // Le message assistant + un message outil distinct.
+        // The assistant message plus one distinct tool message.
         assert_eq!(out.len(), 2);
         assert_eq!(out[1].role, Role::Tool);
+        // `Message.tool(result)` in the TS sets no id on the tool message.
+        assert!(out[1].id.is_none(), "tool messages carry no id");
+        // Single text content: ToolOutput.toResultValue yields {type:"text"}.
+        match &out[1].content[0] {
+            ContentPart::ToolResult { result, .. } => {
+                assert_eq!(result, &ToolResultValue::Text { value: Value::String("contenu".into()) });
+            }
+            other => panic!("expected ToolResult, got {other:?}"),
+        }
     }
 
     #[test]
-    fn un_entree_json_invalide_est_transmise_brute() {
-        // Perdre l'appel sur un JSON mal forme empecherait le modele de le
-        // corriger lui-meme.
+    fn invalid_json_input_is_forwarded_raw() {
+        // Losing the call over malformed JSON would prevent the model from
+        // correcting it itself.
         let tool = AssistantTool {
             id: "call_1".into(),
             name: "read".into(),
@@ -579,7 +706,7 @@ mod tests {
     }
 
     #[test]
-    fn une_erreur_d_outil_est_typee_comme_telle() {
+    fn a_tool_error_is_typed_as_such() {
         let tool = AssistantTool {
             id: "call_1".into(),
             name: "read".into(),
@@ -600,8 +727,144 @@ mod tests {
         };
         let r = tool_result(&tool, None).unwrap();
         match r {
-            ContentPart::ToolResult { result_type, .. } => assert_eq!(result_type.as_deref(), Some("error")),
-            other => panic!("attendu ToolResult, obtenu {other:?}"),
+            ContentPart::ToolResult { result, provider_executed, .. } => match result {
+                // The TS wraps error results as {type:"error",
+                // value:{error, content, structured}} - no flat shape.
+                ToolResultValue::Error { value } => {
+                    assert_eq!(value["error"]["message"], "fichier introuvable");
+                    assert!(value["content"].is_array());
+                    assert_eq!(value["structured"], Value::Null);
+                    // No provider: the TS leaves providerExecuted undefined.
+                    assert_eq!(provider_executed, None);
+                }
+                other => panic!("expected ToolResultValue::Error, got {other:?}"),
+            },
+            other => panic!("expected ToolResult, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tool_part_tags_are_kebab_case() {
+        // Protocols check part.type === "tool-call"; "toolcall" matches nothing.
+        let part = ContentPart::ToolCall {
+            id: "call_1".into(),
+            name: "read".into(),
+            input: Value::Null,
+            provider_executed: None,
+            provider_metadata: None,
+        };
+        let json = serde_json::to_value(&part).unwrap();
+        assert_eq!(json["type"], "tool-call");
+
+        let part = ContentPart::ToolResult {
+            id: "call_1".into(),
+            name: "read".into(),
+            result: ToolResultValue::Json { value: Value::Null },
+            provider_executed: None,
+            provider_metadata: None,
+        };
+        let json = serde_json::to_value(&part).unwrap();
+        assert_eq!(json["type"], "tool-result");
+        // resultType never reaches the wire: it is an input hint to make().
+        assert!(json.get("resultType").is_none());
+        assert_eq!(json["result"]["type"], "json");
+    }
+
+    #[test]
+    fn a_compaction_message_frames_summary_and_recent_context() {
+        let msg = Message::Compaction(Compaction {
+            base: MessageBase::new("msg_1", 1),
+            reason: CompactionReason::Auto,
+            summary: "on a parle de Rust".into(),
+            recent: "la derniere question".into(),
+        });
+        let out = to_llm_messages(&msg, &target());
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].role, Role::User);
+        assert_eq!(out[0].id.as_deref(), Some("msg_1"));
+        match &out[0].content[0] {
+            ContentPart::Text { text } => {
+                assert!(text.starts_with("<conversation-checkpoint>"));
+                assert!(text.contains("<summary>\non a parle de Rust\n</summary>"));
+                assert!(text.contains("<recent-context>\nla derniere question\n</recent-context>"));
+            }
+            other => panic!("expected Text, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn result_priority_follows_content_not_structured() {
+        // The TS looks at content first: a single text yields {type:"text"}
+        // even when structured is non-empty.
+        let v = to_result_value(
+            &serde_json::json!({ "champ": 1 }),
+            &[ToolContent::Text { text: "sortie".into() }],
+        );
+        assert_eq!(v, ToolResultValue::Text { value: Value::String("sortie".into()) });
+
+        // Empty content: the raw structured value wrapped as json.
+        let v = to_result_value(&serde_json::json!({ "champ": 1 }), &[]);
+        assert_eq!(v, ToolResultValue::Json { value: serde_json::json!({ "champ": 1 }) });
+
+        // Several parts: the whole array as content, nothing flattened away.
+        let v = to_result_value(&Value::Null, &[ToolContent::Text { text: "a".into() }, ToolContent::Text { text: "b".into() }]);
+        match v {
+            ToolResultValue::Content { value } => assert_eq!(value.as_array().map(|a| a.len()), Some(2)),
+            other => panic!("expected Content, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_already_tagged_result_value_is_passed_through() {
+        // isToolResultValue: a {type, value} object keeps its own tag...
+        assert_eq!(
+            make_result_value(serde_json::json!({ "type": "text", "value": "ok" }), "error"),
+            ToolResultValue::Text { value: Value::String("ok".into()) }
+        );
+        // ...anything else is wrapped with the given hint...
+        assert_eq!(
+            make_result_value(serde_json::json!("brut"), "error"),
+            ToolResultValue::Error { value: Value::String("brut".into()) }
+        );
+        // ...and the "content" hint only accepts arrays.
+        assert_eq!(
+            make_result_value(serde_json::json!({ "pas": "tableau" }), "content"),
+            ToolResultValue::Content { value: Value::Array(Vec::new()) }
+        );
+    }
+
+    #[test]
+    fn an_executed_tool_without_result_falls_back_to_local_computation() {
+        // TS: executed && result !== undefined decides the fast path; an
+        // executed tool whose state.result is missing recomputes locally.
+        let mut a = Assistant::new("msg_1", 1, "build", ModelRef::new("gpt-4", "openai"));
+        a.content.push(AssistantContent::Tool(AssistantTool {
+            id: "call_1".into(),
+            name: "read".into(),
+            provider: Some(AssistantToolProvider { executed: true, metadata: None, result_metadata: None }),
+            state: ToolState::Completed {
+                input: serde_json::json!({}),
+                attachments: None,
+                content: vec![ToolContent::Text { text: "sortie".into() }],
+                output_paths: None,
+                structured: Value::Null,
+                result: None,
+            },
+            time: crate::schema::session_message::AssistantToolTime {
+                created: 1,
+                ran: None,
+                completed: Some(2),
+                pruned: None,
+            },
+        }));
+        let out = to_llm_messages(&Message::Assistant(a), &target());
+        // Executed: call and result stay inline in the one assistant message.
+        assert_eq!(out.len(), 1);
+        match &out[0].content[1] {
+            ContentPart::ToolResult { result, .. } => {
+                assert_eq!(result, &ToolResultValue::Text { value: Value::String("sortie".into()) });
+            }
+            other => panic!("expected ToolResult, got {other:?}"),
         }
     }
 }

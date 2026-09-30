@@ -61,10 +61,21 @@ pub type ProviderMetadata = Value;
 
 // ------------------------------------------------------------------ prompt et fichiers
 
+/// File attachment of a user message, mirror of `Prompt.FileAttachment`
+/// (packages/schema/src/prompt.ts): `{uri, mime, name?, description?, source?}`.
+///
+/// The field is called `uri`, not `path`: that is the name written on the
+/// wire, and attachments produced by the TS contain no `path`.
+/// `source` is not carried here: it does not influence the LLM conversion and
+/// will be added with the consolidation of the file contracts.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FileAttachment {
-    pub path: String,
+    pub uri: String,
     pub mime: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
