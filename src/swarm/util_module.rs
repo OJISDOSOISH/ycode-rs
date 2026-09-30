@@ -71,7 +71,7 @@
 //!   la divergence la plus visible, et elle ne se voit pas sur les quatre
 //!   tests du depot : voir la section "point faible" du rapport.
 //! - **Les conditions d export** (`import` / `require` / `default` / `node`),
-!   les jokers de motif `"."` et le blocage par `null` : ce sont des donnees
+//!   les jokers de motif `"."` et le blocage par `null` : ce sont des donnees
 //!   pilotant un moteur, pas de la logique de chemin.
 //! - **Les modules integres** : `Module.resolve("node:fs", dir)` rend
 //!   `"node:fs"` cote Node, ici `None`. Aucune liste de modules integres n est

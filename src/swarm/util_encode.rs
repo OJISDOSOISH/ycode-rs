@@ -571,7 +571,8 @@ mod tests {
     #[test]
     fn ascii_whitespace_is_stripped_anywhere() {
         assert_eq!(base64_decode(" Zh\n"), Ok("f".to_string()));
-        assert_eq!(base64_decode("Z\r\nm9\tv\f"), Ok("foo".to_string()));
+        // `\f` is not a Rust escape sequence: the ASCII form feed is `\u{c}`.
+        assert_eq!(base64_decode("Z\r\nm9\tv\u{c}"), Ok("foo".to_string()));
         assert_eq!(base64_decode(" Zm9v "), Ok("foo".to_string()));
     }
 
