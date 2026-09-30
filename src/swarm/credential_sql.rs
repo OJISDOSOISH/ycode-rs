@@ -1255,7 +1255,7 @@ mod tests {
     fn the_row_serializes_to_exactly_the_nine_ddl_column_names() {
         // Le contrat de la ligne est celui de la base, pas celui du JSON
         // public. Une faute sur `integration_id` passerait la compilation.
-        let l = ligne(Some("cred_1", Some("int_1"), 0);
+        let l = ligne(Some("cred_1"), Some("int_1"), 0);
         let json = serde_json::to_value(&l).expect("serialisation");
         let mut cles: Vec<&str> = json
             .as_object()
@@ -1288,7 +1288,7 @@ mod tests {
         // Piege 1, cote echange : la source ecrit `integrationID` dans son
         // `Schema.Class`, et la base ecrit `integration_id`. Les deux doivent
         // pouvoir coexister, et la ligne ne sort que sous le nom de colonne.
-        let l = ligne(Some("cred_1", Some("int_1"), 0);
+        let l = ligne(Some("cred_1"), Some("int_1"), 0);
         let json = serde_json::to_value(&l).expect("serialisation");
         assert!(json.get("integrationID").is_none());
         assert!(json.get("integrationId").is_none());
@@ -1304,7 +1304,7 @@ mod tests {
         // JSON serait une faute de protocole, pas une valeur. C'est l'inverse
         // du reflexe pose sur une structure JSON, ou une cle absente vaut
         // `undefined`.
-        let l = ligne(Some("cred_1", None, 0);
+        let l = ligne(Some("cred_1"), None, 0);
         let json = serde_json::to_value(&l).expect("serialisation");
         for nom in ["integration_id", "connector_id", "method_id", "active"] {
             assert!(json.get(nom).is_some(), "{nom} doit rester une cle presente");
@@ -1320,7 +1320,7 @@ mod tests {
         // `notNull` interdit `NULL`, il n'interdit pas `""`. Une integration
         // vide est une valeur presente, et le fichier ne doit pas la
         // transformer en `None` sous le pretexte qu'elle ne designe rien.
-        let mut l = ligne(Some("cred_1", Some("int_1"), 0);
+        let mut l = ligne(Some("cred_1"), Some("int_1"), 0);
         l.integration_id = Some(String::new());
         let json = serde_json::to_value(&l).expect("serialisation");
         assert!(json["integration_id"].is_string());
@@ -1331,14 +1331,14 @@ mod tests {
 
     #[test]
     fn the_row_round_trips_through_json_including_nullable_columns() {
-        let l = ligne(Some("cred_1", Some("int_1"), 1_700_000_000_000);
+        let l = ligne(Some("cred_1"), Some("int_1"), 1_700_000_000_000);
         let relue: CredentialTableRow =
             serde_json::from_str(&serde_json::to_string(&l).expect("serialisation")).expect("deserialisation");
         assert_eq!(relue, l);
 
         // Et avec les colonnes heritees renseignees, ce que le service ne fait
         // jamais mais que la base peut contenir.
-        let mut heritee = ligne(Some("cred_2", None, 0);
+        let mut heritee = ligne(Some("cred_2"), None, 0);
         heritee.connector_id = Some("conn_1".to_string());
         heritee.method_id = Some("meth_1".to_string());
         heritee.active = Some(true);
@@ -1392,7 +1392,7 @@ mod tests {
 
     #[test]
     fn the_active_flag_round_trips_as_a_boolean_and_its_absence_as_null() {
-        let mut l = ligne(Some("cred_1", Some("int_1"), 0);
+        let mut l = ligne(Some("cred_1"), Some("int_1"), 0);
         l.active = Some(false);
         let json = serde_json::to_value(&l).expect("serialisation");
         assert_eq!(json["active"], false, "le booleen reste un booleen cote JSON");
@@ -1401,7 +1401,7 @@ mod tests {
         // L'absence de drapeau est `null`, et se distingue donc de la presence
         // du drapeau a `false` - ce que le `DEFAULT false` de la table
         // initiale ne permettait pas.
-        let sans = ligne(Some("cred_2", Some("int_1"), 0);
+        let sans = ligne(Some("cred_2"), Some("int_1"), 0);
         let json = serde_json::to_value(&sans).expect("serialisation");
         assert!(json["active"].is_null());
     }
@@ -1419,7 +1419,7 @@ mod tests {
 
     #[test]
     fn touching_a_row_moves_only_the_update_timestamp() {
-        let mut l = ligne(Some("cred_1", Some("int_1"), 100);
+        let mut l = ligne(Some("cred_1"), Some("int_1"), 100);
         l.toucher(500);
         assert_eq!(l.time_updated, 500);
         assert_eq!(l.time_created, 100, "la date de creation ne recule jamais");
@@ -1437,9 +1437,9 @@ mod tests {
         // Les quatre cas de la matrice, parce que c'est toute la difference
         // entre un ternaire et un coalescent :
         //              colonne       nullite (`??`)  veracite (`!x`)
-        let presente = ligne(Some("cred_1", Some("int_1"), 0);
-        let vide = ligne(Some("cred_2", Some(""), 0);
-        let absente = ligne(Some("cred_3", None, 0);
+        let presente = ligne(Some("cred_1"), Some("int_1"), 0);
+        let vide = ligne(Some("cred_2"), Some(""), 0);
+        let absente = ligne(Some("cred_3"), None, 0);
 
         assert!(!integration_absente(&presente));
         assert!(!integration_sans_contenu(&presente));
@@ -1456,7 +1456,7 @@ mod tests {
         // La chaine vide est une etiquette et une integration presentes. Elle
         // ne doit ni disparaitre de la ligne, ni etre transformee en `None`
         // par un `unwrap_or_default` ou un `if !x`.
-        let mut l = ligne(Some("cred_1", Some("int_1"), 0);
+        let mut l = ligne(Some("cred_1"), Some("int_1"), 0);
         l.integration_id = Some(String::new());
         l.label = String::new();
         assert_eq!(l.integration_id.as_deref(), Some(""));
@@ -1470,9 +1470,9 @@ mod tests {
         // Une seule ligne des trois est presente a la base et vide pour le
         // voisin : celle dont `integration_id` vaut la chaine vide.
         let tranche = vec![
-            ligne(Some("cred_1", Some("int_1"), 0),
-            ligne(Some("cred_2", Some(""), 0),
-            ligne(Some("cred_3", None, 0),
+            ligne(Some("cred_1"), Some("int_1"), 0),
+            ligne(Some("cred_2"), Some(""), 0),
+            ligne(Some("cred_3"), None, 0),
         ];
         let discordees = lignes_discordees(&tranche);
         assert_eq!(discordees.len(), 1);
@@ -1482,9 +1482,9 @@ mod tests {
     #[test]
     fn a_slice_without_an_empty_integration_produces_no_disagreeing_rows() {
         let tranche = vec![
-            ligne(Some("cred_1", Some("int_1"), 0),
-            ligne(Some("cred_2", Some("int_2"), 0),
-            ligne(Some("cred_3", None, 0),
+            ligne(Some("cred_1"), Some("int_1"), 0),
+            ligne(Some("cred_2"), Some("int_2"), 0),
+            ligne(Some("cred_3"), None, 0),
         ];
         assert!(lignes_discordees(&tranche).is_empty());
 
@@ -1496,9 +1496,9 @@ mod tests {
     #[test]
     fn disagreeing_rows_keep_their_input_order() {
         let tranche = vec![
-            ligne(Some("cred_1", Some(""), 0),
-            ligne(Some("cred_2", Some("int_1"), 0),
-            ligne(Some("cred_3", Some(""), 0),
+            ligne(Some("cred_1"), Some(""), 0),
+            ligne(Some("cred_2"), Some("int_1"), 0),
+            ligne(Some("cred_3"), Some(""), 0),
         ];
         let discordees = lignes_discordees(&tranche);
         assert_eq!(discordees.len(), 2);

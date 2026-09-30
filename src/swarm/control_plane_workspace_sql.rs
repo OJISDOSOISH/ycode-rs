@@ -195,7 +195,7 @@ pub const WORKSPACE_FOREIGN_KEY_NAME: &str = "fk_workspace_project_id_project_id
 ///
 /// C'est une chaine vide, et non `NULL` : l'absence de nom se lit donc comme un
 /// nom vide. La colonne etant par ailleurs `NOT NULL`, les deux lectures ne
-//! peuvent pas etre confondues.
+/// peuvent pas etre confondues.
 pub const NAME_DEFAULT_SQL: &str = "''";
 
 // ---------------------------------------------------------------------------
