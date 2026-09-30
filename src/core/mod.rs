@@ -5,3 +5,11 @@
 
 pub mod run;
 pub mod session;
+
+pub mod command;
+pub mod credential;
+pub mod global;
+pub mod image;
+pub mod model;
+pub mod open;
+pub mod provider;
