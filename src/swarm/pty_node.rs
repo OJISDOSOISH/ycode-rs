@@ -515,6 +515,12 @@ mod tests {
         fn journal(&self) -> Vec<String> {
             self.0.journal.borrow().clone()
         }
+
+        /// Change le `pid` de l'etat partage apres la construction de
+        /// l'adaptateur, pour verifier que la copie du debut ne bouge pas.
+        fn imposer_pid(&self, valeur: u32) {
+            self.0.pid.set(valeur);
+        }
     }
 
     impl Proc for FauxPty {
@@ -809,7 +815,7 @@ mod tests {
         // l'objet rendu ne doit pas bouger.
         let faux = FauxPty::nouveau();
         let adaptateur = spawn("pwsh.exe", &[], &Opts::new("pwsh"), faux);
-        faux.pid.set(7);
+        faux.imposer_pid(7);
         assert_eq!(faux.pid(), 7, "l'implementation a bien change");
         assert_eq!(adaptateur.pid(), 4242, "mais la copie reste celle du depart");
     }
