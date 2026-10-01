@@ -10,6 +10,8 @@ pub mod command;
 pub mod config_agent;
 pub mod config_mcp;
 pub mod config_plugin_command;
+pub mod config_plugin_external;
+pub mod config_plugin_provider;
 pub mod config_plugin_skill;
 pub mod config_provider;
 pub mod copilot_chat;
