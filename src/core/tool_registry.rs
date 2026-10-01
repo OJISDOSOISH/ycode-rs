@@ -32,7 +32,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::permission::{Effect as RuleEffect, Ruleset};
+use crate::permission::{Effect as RuleEffect, Rule};
 
 /// A tool as the registry stores it. The TS keeps an opaque `identity` beside
 /// it and a scope token; only the identity survives here, because comparing it
@@ -89,7 +89,7 @@ impl Registry {
     }
 
     /// `materialize`: the effective set minus the wholly disabled tools.
-    pub fn materialize(&self, permissions: &Ruleset) -> Materialization {
+    pub fn materialize(&self, permissions: &[Rule]) -> Materialization {
         let entries: Vec<(String, Registration)> = self
             .effective()
             .into_iter()
@@ -159,7 +159,13 @@ pub fn stale_tool_call(name: &str) -> String {
 /// A tool is hidden only when the final rule matching its action both denies
 /// and names `"*"` as the resource. Any later `allow` or `ask`, or a later deny
 /// scoped to particular resources, keeps the tool visible.
-pub fn wholly_disabled(action: &str, rules: &Ruleset) -> bool {
+///
+/// Takes a slice rather than the `Ruleset` alias: `Ruleset` is a `Vec<Rule>`,
+/// and a `&Vec` parameter refuses `&[]` and `&[rule(..)]` at the call site. A
+/// slice accepts every caller, `&vec![..]` included through deref coercion, so
+/// the whole family of mismatched-type errors disappears instead of being
+/// papered over with a type annotation per test.
+pub fn wholly_disabled(action: &str, rules: &[Rule]) -> bool {
     let rule = rules
         .iter()
         .rev()
@@ -173,7 +179,7 @@ pub fn wholly_disabled(action: &str, rules: &Ruleset) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::permission::Rule;
+
 
     fn reg(identity: u64, action: &str) -> Registration {
         Registration { identity, action: action.to_string() }
@@ -205,35 +211,35 @@ mod tests {
 
     #[test]
     fn a_blanket_deny_hides_the_tool() {
-        let rules: Ruleset = vec![rule("*", "*", RuleEffect::Deny)];
+        let rules = vec![rule("*", "*", RuleEffect::Deny)];
         assert!(wholly_disabled("read", &rules));
     }
 
     #[test]
     fn a_later_allow_brings_the_tool_back() {
         // The rule that matters is the LAST match, not the first.
-        let rules: Ruleset = vec![rule("*", "*", RuleEffect::Deny), rule("read", "*", RuleEffect::Allow)];
+        let rules = vec![rule("*", "*", RuleEffect::Deny), rule("read", "*", RuleEffect::Allow)];
         assert!(!wholly_disabled("read", &rules), "findLast, not find");
         assert!(wholly_disabled("write", &rules), "write still matches the deny");
     }
 
     #[test]
     fn a_deny_scoped_to_resources_does_not_hide_the_tool() {
-        let rules: Ruleset = vec![rule("read", "/etc/*", RuleEffect::Deny)];
+        let rules = vec![rule("read", "/etc/*", RuleEffect::Deny)];
         assert!(!wholly_disabled("read", &rules), "the resource is not *");
     }
 
     #[test]
     fn no_matching_rule_never_hides_the_tool() {
-        let none: Ruleset = Vec::new();
+        let none: Vec<Rule> = Vec::new();
         assert!(!wholly_disabled("read", &none));
-        let other: Ruleset = vec![rule("write", "*", RuleEffect::Deny)];
+        let other = vec![rule("write", "*", RuleEffect::Deny)];
         assert!(!wholly_disabled("read", &other));
     }
 
     #[test]
     fn an_ask_does_not_hide_the_tool() {
-        let rules: Ruleset = vec![rule("*", "*", RuleEffect::Ask)];
+        let rules = vec![rule("*", "*", RuleEffect::Ask)];
         assert!(!wholly_disabled("read", &rules));
     }
 
@@ -241,7 +247,7 @@ mod tests {
     fn a_disabled_tool_is_dropped_from_the_advertised_set() {
         let mut registry = Registry::new();
         registry.register(&[("read".into(), reg(1, "read")), ("write".into(), reg(2, "write"))]);
-        let rules: Ruleset = vec![rule("write", "*", RuleEffect::Deny)];
+        let rules = vec![rule("write", "*", RuleEffect::Deny)];
         let listed = registry.materialize(&rules);
         assert_eq!(listed.names(), vec!["read"]);
     }
@@ -250,7 +256,7 @@ mod tests {
     fn materialize_keeps_every_tool_when_nothing_is_disabled() {
         let mut registry = Registry::new();
         registry.register(&[("read".into(), reg(1, "read")), ("write".into(), reg(2, "write"))]);
-        let rules: Ruleset = vec![];
+        let rules = vec![];
         assert_eq!(registry.materialize(&rules).names(), vec!["read", "write"]);
     }
 
@@ -282,7 +288,7 @@ mod tests {
     fn the_advertised_path_reads_from_the_frozen_set() {
         let mut registry = Registry::new();
         registry.register(&[("read".into(), reg(1, "read"))]);
-        let empty: Ruleset = vec![];
+        let empty: Vec<Rule> = Vec::new();
         let frozen = registry.materialize(&empty);
         // Registered again after the definitions went out.
         registry.register(&[("read".into(), reg(2, "read"))]);
@@ -298,9 +304,9 @@ mod tests {
     fn a_tool_disabled_after_the_definitions_reads_as_unknown() {
         let mut registry = Registry::new();
         registry.register(&[("read".into(), reg(1, "read"))]);
-        let empty: Ruleset = vec![];
+        let empty: Vec<Rule> = Vec::new();
         let frozen = registry.materialize(&empty);
-        let rules: Ruleset = vec![rule("read", "*", RuleEffect::Deny)];
+        let rules = vec![rule("read", "*", RuleEffect::Deny)];
         let disabled = registry.materialize(&rules);
         assert!(frozen.settle_error("read", Some(1)).is_none());
         assert_eq!(
@@ -313,7 +319,7 @@ mod tests {
     #[test]
     fn a_name_never_registered_is_unknown_on_both_paths() {
         let registry = Registry::new();
-        let empty: Ruleset = vec![];
+        let empty: Vec<Rule> = Vec::new();
         let frozen = registry.materialize(&empty);
         assert_eq!(frozen.settle_error("read", Some(1)), Some(unknown_tool("read")));
         assert_eq!(registry.check_settlement("read", Some(1)), Some(unknown_tool("read")));
