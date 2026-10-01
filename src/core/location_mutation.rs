@@ -225,8 +225,25 @@ fn normalise(path: &str) -> String {
 }
 
 /// `FSUtil.contains`, reusing the implementation rather than restating it.
+///
+/// The platform is the HOST's, because the TypeScript `FSUtil.contains` calls
+/// Node's `path.relative`, which is native: `path.win32.relative` on Windows,
+/// `path.posix.relative` elsewhere. Passing `Platform::Posix` here regardless
+/// of host was wrong in a way that mattered, because the two disagree about
+/// what is rooted - `path.posix` does not treat a leading backslash as a root,
+/// so a drive-rooted `C:\work` read as an ordinary relative name, and a sibling
+/// path beside it came back "contained".
+///
+/// Still platform-naive, and deliberately so for now: `is_absolute` and
+/// `resolve_against` above. They accept a leading backslash on either platform,
+/// where `path.posix.isAbsolute("\\x")` is false, and `path.win32.resolve(base,
+/// "\\x")` keeps the base's drive where this module would drop it. Both are
+/// reachable only from a Windows-shaped input on a POSIX host, and fixing them
+/// properly means threading a platform through `ResolveInput` and every test
+/// that calls `resolve`. That is a larger change than it looks, and it is
+/// recorded here rather than left to be rediscovered.
 fn contains(parent: &str, child: &str) -> bool {
-    super::fs_util::contains(parent, child, super::fs_util::Platform::Posix)
+    super::fs_util::contains(parent, child, super::fs_util::Platform::host())
 }
 
 /// `path.relative`, reusing `config_plugin_path`'s implementation.
