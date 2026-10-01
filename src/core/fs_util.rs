@@ -170,9 +170,30 @@ pub fn contains(parent: &str, child: &str, platform: Platform) -> bool {
     if result == ".." {
         return false;
     }
-    // `concat!` already yields a `&'static str`, so the `&` made this `&&str`,
-    // which is not a `Pattern`. `starts_with` wanted the literal itself.
-    !result.starts_with(concat!("..", SEP))
+    // `concat!` accepts LITERALS only, so `concat!("..", SEP)` is rejected - and the
+    // headline names the wrong place. It says
+    //
+    //     error: expected a literal
+    //        --> src/core/fs_util.rs:175:39
+    //         |  !result.starts_with(concat!("..", SEP))
+    //         |                                       ^^^
+    //         = note: only literals (like "foo", -42 and 3.14) can be passed to concat!()
+    //
+    // pointing at the argument of `starts_with`, which would have been perfectly
+    // happy with whatever `concat!` produced. Two rounds of diagnosis went the
+    // wrong way from that headline: the first removed the `&`, reasoning that
+    // `&&str` is not a `Pattern` - true, and irrelevant; the second concluded
+    // that `starts_with` is a builtin macro needing a literal pattern - also
+    // true of many of its siblings, and not the cause here, since
+    // `starts_with(concat!("..", "/"))` compiles.
+    //
+    // The note is the whole answer, and it is one line further down. Read the
+    // note.
+    //
+    // `strip_prefix` is an ordinary generic taking a `Pattern`, so the check
+    // goes through it and the separator stays written down once, in `SEP`.
+    let climbs_out = result.strip_prefix("..").and_then(|rest| rest.strip_prefix(SEP)).is_some();
+    !climbs_out
 }
 
 /// `overlaps`: either path contains the other.
