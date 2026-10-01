@@ -255,7 +255,7 @@ mod tests {
         // only the tag was missing once already: the assertion that failed first
         // read a field that had been renamed, which is a quieter mistake than a
         // wrong tag and needs a different check.
-        assert_eq!(checkout["_tag"], serde_json::json!("RepositoryCacheCheckoutFailedError"));
+        assert_eq!(v["_tag"], serde_json::json!("RepositoryCacheCheckoutFailedError"));
 
         // `localPath` on the wire, `local_path` in Rust. Every other field in
         // this enum is one word, so nothing else here depends on the convention.

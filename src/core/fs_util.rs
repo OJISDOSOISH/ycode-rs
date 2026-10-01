@@ -466,7 +466,7 @@ mod tests {
         assert_eq!(windows_path("/z", W), "Z:/");
         assert_eq!(windows_path("/cygdrive/c", W), "C:/");
         assert_eq!(windows_path("/mnt/c", W), "C:/");
-        assert_eq!(windows_path("/c/", W), "C:/");
+        assert_eq!(windows_path("/c/", W), "C:/", "a separator already there is consumed too");
     }
 
     #[test]
@@ -488,13 +488,6 @@ mod tests {
     fn the_drive_letter_is_uppercased() {
         assert_eq!(windows_path("/z:/x", W), "Z:/x");
         assert_eq!(windows_path("/Q/a", W), "Q:/a");
-    }
-
-    #[test]
-    fn a_bare_drive_and_a_trailing_separator_both_work() {
-        assert_eq!(windows_path("/c:", W), "C:/");
-        assert_eq!(windows_path("/c", W), "C:/");
-        assert_eq!(windows_path("/c/", W), "C:/");
     }
 
     #[test]
