@@ -1000,8 +1000,17 @@ mod tests {
         assert!(!etat.manages("anthropic "), "trimming crept in");
         assert!(!etat.manages(" anthropic"), "trimming crept in");
         assert!(!etat.manages("Anthropic"));
-        assert!(!etat.manages(""));
         assert!(!etat.manages("1"), "no numeric coercion");
+
+        // `includes` is exact, so the empty entry above matches an empty id and
+        // nothing else. The reverse needs its own state: this test previously
+        // asserted `manages("")` both TRUE and FALSE on the same value, four
+        // lines apart. A list with no empty entry is what proves the other half.
+        let sans_vide = ConsoleState::new(vec!["anthropic".to_string()], None, 2);
+        assert!(
+            !sans_vide.manages(""),
+            "an empty id matches no non-empty entry"
+        );
 
         // The empty state manages nothing.
         assert!(!EMPTY_CONSOLE_STATE.manages("anthropic"));
@@ -1048,7 +1057,13 @@ mod tests {
         assert_eq!(relu.active_org_name.as_deref(), Some(tirets.as_str()));
         assert_eq!(relu.active_org_name.as_ref().map(String::len), Some(15));
         assert_eq!(relu.active_org_name.as_ref().map(|v| v.chars().count()), Some(5));
-        assert!(relu.manages("\u{2014}\u{2014}"), "an exact prefix is not a match");
+        // A prefix is not a match: the list holds five em-dashes, `manages` is
+        // `includes`, so two em-dashes is a different string. The message below
+        // always said so; the assertion said the opposite.
+        assert!(
+            !relu.manages("\u{2014}\u{2014}"),
+            "an exact prefix is not a match"
+        );
         assert!(relu.manages(&tirets));
 
         // An emoji is four bytes, a combining sequence two: no special case is

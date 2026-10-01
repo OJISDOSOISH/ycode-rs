@@ -239,30 +239,48 @@ mod tests {
         let relu: Markdown = serde_json::from_str(&json).expect("deserialisation");
         assert_eq!(relu.as_str(), source);
         // Les compteurs portent sur des scalaires, pas sur des octets.
-        assert_eq!(source.len(), 21);
-        assert_eq!(source.chars().count(), 13);
+        //
+        // "cafe" holds FOUR ASCII bytes, so the accented e starts at byte 4, not
+        // byte 3: cafe | e-accentue(2) | space | emoji(4) | space | zhong(3) |
+        // wen(3) | space | fin(3) = 22. Counting 21 and 13 came from reading the
+        // plain `e` as the accented one.
+        assert_eq!(source.len(), 22);
+        assert_eq!(source.chars().count(), 14);
     }
 
     #[test]
     #[should_panic(expected = "char boundary")]
     fn tronquer_sur_un_index_octet_au_milieu_d_un_caractere_panique() {
-        // Risque connu du lot, ici montre et non evite : dans "cafe\u{e9}", le
-        // `e` accentue occupe les octets 3..5, donc l'index 4 est au milieu.
-        // C'est pour cela que l'API expose `as_str` et rien qui coupe.
+        // Risque connu du lot, ici montre et non evite.
+        //
+        // "cafe\u{e9}" is six bytes: c a f e, then the accented e as 0xc3 0xa9
+        // at bytes 4..6. Byte 4 is therefore the START of the accented e, a
+        // perfectly valid boundary; byte 5 is the one inside it. Slicing at 4
+        // does not panic, which is why this test used to fail.
         let m = Markdown::nouveau("cafe\u{e9}");
-        let _ = &m.as_str()[..4];
+        // The slice is USED on purpose: bound to `_` the compiler is free to
+        // drop the computation along with the panic, and the test then reports
+        // "should panic" on a body that never panicked.
+        let milieu = &m.as_str()[..5];
+        assert_eq!(milieu.len(), 5, "unreachable: the slice above panics first");
     }
 
     #[test]
     fn une_frontiere_de_caractere_est_elle_un_index_octet_valide() {
         // Le pendant utile du test precedent : `char_indices` renvoie des
         // positions sur lesquelles le slicing est sur.
+        //
+        // Seven positions, not six: "cafe" is four ASCII bytes, so the accented
+        // e starts at byte 4 and byte 4 IS a boundary. Byte 5 is the one inside
+        // it, and byte 6 is the space. The expected list had lost the 4.
         let m = Markdown::nouveau("cafe\u{e9} \u{1f600}");
         let positions: Vec<usize> = m.as_str().char_indices().map(|(i, _)| i).collect();
-        assert_eq!(positions, vec![0, 1, 2, 3, 6, 7]);
+        assert_eq!(positions, vec![0, 1, 2, 3, 4, 6, 7]);
         for position in positions {
             assert!(m.as_str().is_char_boundary(position));
         }
+        // And the neighbouring index, the one that is NOT a boundary, is 5.
+        assert!(!m.as_str().is_char_boundary(5));
     }
 
     #[test]

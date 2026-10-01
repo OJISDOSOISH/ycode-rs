@@ -302,7 +302,13 @@ mod tests {
 
     /// A store whose base value counts how many times it has been built, which
     /// is how a reload is observed from outside.
-    fn counting_store(count: &std::sync::atomic::AtomicUsize) -> Store<Lines> {
+    ///
+    /// The counter is an `Arc`, not a reference: `Transform` is `'static`, so a
+    /// `move` closure cannot capture a borrow that dies at this function's
+    /// return. Passing `Arc<AtomicUsize>` by value is what makes the closure
+    /// well-formed - a `&AtomicUsize` compiles nowhere else in these tests
+    /// either.
+    fn counting_store(count: std::sync::Arc<std::sync::atomic::AtomicUsize>) -> Store<Lines> {
         Store::new(without_finalize(move || {
             count.fetch_add(1, Ordering::SeqCst);
             Vec::new()
@@ -332,8 +338,8 @@ mod tests {
 
     #[test]
     fn the_initial_function_runs_for_every_reload_not_once() {
-        let count = std::sync::atomic::AtomicUsize::new(0);
-        let s = counting_store(&count);
+        let count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let s = counting_store(count.clone());
         assert_eq!(count.load(Ordering::SeqCst), 1, "once at construction");
         push(&s, "a");
         assert_eq!(count.load(Ordering::SeqCst), 2, "and once per reload");
@@ -414,7 +420,7 @@ mod tests {
 
     #[test]
     fn the_finalizer_runs_again_on_every_reload() {
-        let count = std::sync::atomic::AtomicUsize::new(0);
+        let count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let s = Store::new(Options {
             initial: Box::new(Vec::new),
             finalize: Some(Box::new(move |_| {
@@ -445,8 +451,8 @@ mod tests {
 
     #[test]
     fn disposing_twice_does_nothing_at_all() {
-        let count = std::sync::atomic::AtomicUsize::new(0);
-        let s = counting_store(&count);
+        let count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let s = counting_store(count.clone());
         push(&s, "a");
         let a = push(&s, "b");
         let after_register = count.load(Ordering::SeqCst);
