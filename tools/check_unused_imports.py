@@ -1,40 +1,35 @@
 """Report `use` imports whose name never appears again in the file.
 
 rustc reports unused imports, but only after a full compile, and on this
-project that costs a CI cycle per mistake. The check is meant to be cheap and
-high precision: an import mentioned exactly once in the file - the import
-itself - is unused.
+project that costs a CI cycle per mistake - about four minutes each, shared
+with two other agents who keep pushing in between. The check is meant to be
+cheap and, above all, honest about what it cannot see.
 
-History worth keeping: the first version of this script reported 15 candidates,
-all 15 false positives. Its own comment-stripping state machine desynchronised
-on a character literal and blanked the rest of the file, so every real mention
-of the imported name disappeared and every import looked unused. It did not
-find the two genuinely unused imports rustc had reported, because those had
-already been fixed by their owners, so there was no ground truth left to check
-against. A checker that produces only false positives is worse than none.
+History, because the false positives are the interesting part:
 
-So this version reuses the character-literal detector from check_braces.py
-verbatim - that one is validated, it found a real defect at the right line, and
-it reported nothing on 213 files - rather than writing a third variant of the
-same fiddly state machine.
+  * The first version reported 15 candidates, all 15 false positives. Its own
+    comment-stripping state machine desynchronised on a character literal and
+    blanked the rest of the file, so every real mention of the imported name
+    disappeared. This version reuses the character-literal detector from
+    check_braces.py verbatim, which is validated.
+  * The second version had one true positive left and zero false positives on
+    this tree - and then kilocode proved it wrong. It flagged
+    `use std::future::Future;` in src/swarm/util_iife.rs, which the file uses
+    through method resolution: Pin<&mut F>::poll(). rustc agreed with the flag
+    and the build broke with E0599. Counting occurrences cannot see a trait used
+    only through a method call or an await.
 
-Measured on the tree at the time of writing: the 15 false positives of the
-first version are gone, and one candidate remains - `use std::future::Future;`
-in src/swarm/util_iife.rs, which is a true positive. Seeded checks: an unused
-import is reported with the right line while its used sibling is not; a trait
-imported only so a macro can resolve it IS reported, which is the documented
-false positive below.
+So the output is graded rather than binary:
 
-Known limits: a trait imported only for method or macro resolution looks
-unused and is a false positive - `use std::fmt::Write;` with only `write!` in
-the body is the case to remember; `use a::*` is skipped; an alias used only in
-another `use` counts as a use.
+  strong  - the name is not a standard-library CamelCase item, where a textual
+            count is decisive.
+  weak    - a CamelCase name from std/core/alloc, which is where the standard
+            library traits live. Reported and labelled, to be read as "check
+            this by hand", because the tool cannot tell a trait from a struct.
 
-A note on measuring this at all: the first seeded check reported zero
-candidates for two imports, one of them unused. The cause was a BOM, so the
-first line did not start at a `use` and the anchor never matched it. A
-measurement that reports nothing is only meaningful once you have shown it can
-report something.
+One case is resolved outright instead of guessed: an import of Future from a
+standard-library path counts as used when the file contains .await or .poll(,
+since that is the only way its methods can be reached.
 
 usage: python check_unused_imports.py [root-or-file]
 """
@@ -167,7 +162,12 @@ def blank_non_code(src):
 
 
 def imported_names(tree):
-    """The local names a single `use` statement binds, or None for a glob."""
+    """The local names a single `use` statement binds, or None for a glob.
+
+    Returns `(name, path)` pairs, because the path decides how far the report can
+    be trusted: a CamelCase item from the standard library may be a trait used
+    only through a method call, which no amount of counting will reveal.
+    """
     names = []
     for part in tree.split(','):
         part = part.strip()
@@ -176,29 +176,54 @@ def imported_names(tree):
         if part.endswith('*'):
             return None
         if ' as ' in part:
-            names.append(part.split(' as ')[-1].strip())
+            path, local = part.split(' as ')
+            names.append((local.strip(), path.strip()))
         else:
-            segment = part.split('::')[-1].strip()
-            if segment:
-                names.append(segment)
+            segments = part.split('::')
+            names.append((segments[-1].strip(), '::'.join(segments[:-1]).strip()))
     return names
 
 
+STD_ROOTS = ('std', 'core', 'alloc')
+
+
+def is_weak(name, path):
+    """A CamelCase name from the standard library: possibly a trait."""
+    return name[:1].isupper() and path.split('::')[0] in STD_ROOTS
+
+
+def resolved_by_method_call(name, code):
+    """The one trait case we settle instead of guessing.
+
+    `Future`'s methods are reachable only through `.await` or `.poll()`, so an
+    import of it alongside either is a use, whatever the name count says. This
+    is the false positive kilocode proved on `util_iife.rs`, where removing the
+    import broke the build with E0599.
+    """
+    if name != 'Future':
+        return False
+    return '.await' in code or '.poll(' in code
+
+
 def check(path):
+    """Return (strong, weak): high-confidence hits, then trait-shaped ones."""
     raw = open(path, encoding='utf-8', errors='replace').read()
     code = blank_non_code(raw)
-    hits = []
+    strong, weak = [], []
     for m in USE.finditer(code):
-        names = imported_names(m.group(1))
-        if not names:
+        entries = imported_names(m.group(1))
+        if not entries:
             continue
         line = raw[:m.start()].count('\n') + 1
-        for name in names:
+        for name, import_path in entries:
             if not re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', name):
                 continue
-            if len(re.findall(r'\b' + re.escape(name) + r'\b', code)) <= 1:
-                hits.append((line, name))
-    return hits
+            if len(re.findall(r'\b' + re.escape(name) + r'\b', code)) > 1:
+                continue
+            if resolved_by_method_call(name, code):
+                continue
+            (weak if is_weak(name, import_path) else strong).append((line, name))
+    return strong, weak
 
 
 def main():
@@ -211,12 +236,18 @@ def main():
             for dirpath, _, names in os.walk(root)
             for n in names if n.endswith('.rs')
         )
-    total = 0
+    strong_total = weak_total = 0
     for path in paths:
-        for line, name in check(path):
-            total += 1
-            print(f'{os.path.relpath(path, os.path.dirname(root))}:{line}: unused import candidate `{name}`')
-    print(f'checked {len(paths)} file(s), {total} candidate(s)')
+        strong, weak = check(path)
+        rel = os.path.relpath(path, os.path.dirname(root))
+        for line, name in strong:
+            strong_total += 1
+            print(f'{rel}:{line}: unused import `{name}`')
+        for line, name in weak:
+            weak_total += 1
+            print(f'{rel}:{line}: maybe unused `{name}` (std item: a trait used through a '
+                  f'method call would look the same - check by hand)')
+    print(f'checked {len(paths)} file(s), {strong_total} unused, {weak_total} maybe unused')
     return 0
 
 
