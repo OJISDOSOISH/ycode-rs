@@ -421,10 +421,13 @@ mod tests {
     #[test]
     fn the_finalizer_runs_again_on_every_reload() {
         let count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        // Cloned BEFORE the move into the closure: the test reads `count` after
+        // the store is built, and a moved Arc cannot be read.
+        let counted = count.clone();
         let s = Store::new(Options {
             initial: Box::new(Vec::new),
             finalize: Some(Box::new(move |_| {
-                count.fetch_add(1, Ordering::SeqCst);
+                counted.fetch_add(1, Ordering::SeqCst);
             })),
         });
         let at_construction = count.load(Ordering::SeqCst);
