@@ -474,8 +474,12 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(target.external_directory.unwrap().directory, "/srv/new");
-        assert_eq!(target.external_directory.unwrap().resource, "/srv/new/*");
+        // Borrowed once: `unwrap()` on an `Option` moves it, so calling it twice
+        // on the same field is a use after move. The error names the SECOND
+        // use, seven characters away from the cause.
+        let external = target.external_directory.as_ref().expect("an external path needs an approval");
+        assert_eq!(external.directory, "/srv/new");
+        assert_eq!(external.resource, "/srv/new/*");
     }
 
     #[test]
