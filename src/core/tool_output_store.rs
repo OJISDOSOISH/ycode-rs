@@ -31,6 +31,12 @@
 //!   it, the head and tail are computed separately even when the byte budget
 //!   was never exceeded, so the same text can come back with a tail that is
 //!   non-empty purely because it had many lines.
+//!
+//! One consequence worth spelling out, because it decides whether a tail exists
+//! at all: the marker is charged BEFORE the sample, so the line budget the
+//! content is sampled against is `maxLines - 4`. A text of exactly that many
+//! lines therefore produces NO tail - it fits - and a test that expects one has
+//! miscounted the marker rather than found a bug.
 
 use serde::{Deserialize, Serialize};
 
@@ -363,11 +369,31 @@ mod tests {
     // --- takePrefix / takeSuffix ---
 
     #[test]
-    fn a_prefix_counts_bytes_not_characters() {
-        // Four bytes per character, so three characters fit in ten bytes.
-        assert_eq!(take_prefix("aaaaaaaaaa", 10), "aaa");
-        assert_eq!(take_prefix("aaaaaaaaaa", 11), "aaa");
-        assert_eq!(take_prefix("aaaaaaaaaa", 12), "aaaa");
+    fn ascii_costs_one_byte_per_character() {
+        // The budget is in bytes, and an ASCII character is one byte, so ten
+        // bytes hold ten characters.
+        assert_eq!(take_prefix("aaaaaaaaaa", 10), "aaaaaaaaaa");
+        assert_eq!(take_prefix("aaaaaaaaaa", 9), "aaaaaaaaa");
+        assert_eq!(take_prefix("aaaaaaaaaa", 4), "aaaa");
+    }
+
+    #[test]
+    fn a_prefix_of_wide_characters_holds_fewer_of_them() {
+        // Ten bytes, four per character: two characters fit, the third would
+        // cross the budget and stops the loop.
+        let wide = "\u{1F600}".repeat(5);
+        assert_eq!(take_prefix(&wide, 10), "\u{1F600}\u{1F600}");
+        assert_eq!(take_prefix(&wide, 8), "\u{1F600}\u{1F600}");
+        assert_eq!(take_prefix(&wide, 12), "\u{1F600}\u{1F600}\u{1F600}");
+    }
+
+    #[test]
+    fn a_two_byte_character_costs_two() {
+        // "é" is two bytes in UTF-8, so five bytes hold two of them.
+        let accented = "ééééé";
+        assert_eq!(take_prefix(accented, 5), "éé");
+        assert_eq!(take_prefix(accented, 4), "éé");
+        assert_eq!(take_prefix(accented, 6), "ééé");
     }
 
     #[test]
@@ -448,8 +474,19 @@ mod tests {
     #[test]
     fn the_head_gets_the_odd_byte_of_an_odd_budget() {
         let p = preview("abcdefghij", 100, 7);
-        assert_eq!(p.head, "abcd", "ceil(7/2) = 4");
-        assert_eq!(p.tail, "ghi", "floor(7/2) = 3");
+        assert_eq!(p.head, "abcd", "ceil(7/2) = 4 bytes from the front");
+        assert_eq!(p.tail, "defghij", "floor(7/2) = 3 bytes, taken from the END");
+    }
+
+    #[test]
+    fn the_suffix_is_taken_from_the_end_not_the_front() {
+        // The same budget read from the other end: the bytes are the LAST ones,
+        // not the ones after the head. This is the pair that catches a port
+        // which reuses the head rule for the tail.
+        let p = preview("abcdefghij", 100, 7);
+        assert_eq!(p.head, "abcd");
+        assert_eq!(p.tail, "hij", "the last three characters");
+        assert_eq!(p.tail, take_suffix("abcdefghij", 3));
     }
 
     // --- boundedPreview ---
@@ -480,14 +517,30 @@ mod tests {
     #[test]
     fn the_marker_appears_between_the_head_and_the_tail() {
         let marker = truncation_marker("/data/tool_abc");
-        let text = "1\n2\n3\n4\n5\n6\n7\n8";
-        let out = bounded_preview(text, &marker, 12, 1_000);
-        assert!(out.contains(&marker));
-        assert!(out.contains("\n\n"), "blank lines around the marker");
-        let head = out.split(&marker).next().unwrap();
-        let tail = out.split(&marker).nth(1).unwrap();
-        assert!(head.contains('1'));
-        assert!(tail.contains('8'));
+        // Twenty lines against a twelve-line budget: the marker takes four, so
+        // only eight lines remain to sample, and 20 > 8 means there IS a tail.
+        // Fewer lines than that would legitimately produce none.
+        let text: Vec<String> = (1..=20).map(|n| n.to_string()).collect();
+        let text = text.join("\n");
+        let out = bounded_preview(&text, &marker, 12, 10_000);
+        assert!(out.contains(&marker), "{}", out);
+        let (head, rest) = out.split_once(&marker).unwrap();
+        let tail = rest.trim_start_matches("\n\n");
+        assert!(head.trim().contains('\n'), "several lines in the head");
+        assert!(head.contains("1"), "the head starts at the beginning");
+        assert!(tail.contains("20"), "the tail ends at the end");
+        assert!(!tail.contains("1\n"), "the middle is gone");
+    }
+
+    #[test]
+    fn a_body_that_fits_the_reduced_budget_has_no_tail() {
+        let marker = truncation_marker("/x");
+        // Eight lines against a twelve-line budget: the marker takes four, the
+        // remaining eight fit exactly, so there is no tail to show.
+        let text = (1..=8).map(|n| n.to_string()).collect::<Vec<String>>().join("\n");
+        let out = bounded_preview(&text, &marker, 12, 10_000);
+        assert!(out.ends_with(&marker));
+        assert!(out.contains('\n'));
     }
 
     #[test]
