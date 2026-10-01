@@ -91,7 +91,7 @@ pub enum EntryKind {
 }
 
 /// Extensions that make a file binary whatever its bytes say.
-pub const BINARY_EXTENSIONS: [&str; 29] = [
+pub const BINARY_EXTENSIONS: [&str; 28] = [
     ".zip", ".tar", ".gz", ".exe", ".dll", ".so", ".class", ".jar", ".war", ".7z", ".doc", ".docx",
     ".xls", ".xlsx", ".ppt", ".pptx", ".odt", ".ods", ".odp", ".bin", ".dat", ".obj", ".o", ".a",
     ".lib", ".wasm", ".pyc", ".pyo",
@@ -258,8 +258,8 @@ mod tests {
     }
 
     #[test]
-    fn the_extension_list_has_twenty_nine_entries() {
-        assert_eq!(BINARY_EXTENSIONS.len(), 29);
+    fn the_extension_list_has_twenty_eight_entries() {
+        assert_eq!(BINARY_EXTENSIONS.len(), 28);
         assert!(BINARY_EXTENSIONS.contains(&".pyc"));
         assert!(!BINARY_EXTENSIONS.contains(&".txt"));
     }
