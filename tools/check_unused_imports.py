@@ -31,6 +31,14 @@ One case is resolved outright instead of guessed: an import of Future from a
 standard-library path counts as used when the file contains .await or .poll(,
 since that is the only way its methods can be reached.
 
+And a third false positive, found when the tree grew a `src/llm/` of module
+indexes: `pub use` is a RE-EXPORT, not an import. The name it binds is supposed to
+appear exactly once - that is what a re-export is - and rustc never warns about
+it because the binding is the use. Counting them produced 124 false positives at
+once, on files that are almost entirely `pub use`. They are skipped now, and the
+count on the same tree went from 124 to 2, the two remaining being real
+warnings the runner reports too.
+
 usage: python check_unused_imports.py [root-or-file]
 """
 
@@ -40,7 +48,7 @@ import sys
 
 DEFAULT_ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'src')
 
-USE = re.compile(r'^[ \t]*(?:pub[ \t]+)?use[ \t]+([^;]+);', re.M)
+USE = re.compile(r'^([ \t]*)((?:pub[ \t]+)?)use[ \t]+([^;]+);', re.M)
 
 
 def is_char_literal(src, start):
@@ -211,7 +219,14 @@ def check(path):
     code = blank_non_code(raw)
     strong, weak = [], []
     for m in USE.finditer(code):
-        entries = imported_names(m.group(1))
+        # A `pub use` is a re-export, not an import: the name it binds is
+        # supposed to appear exactly once, and rustc never warns about it
+        # because the binding IS the use. Skipping them matters - a module
+        # index is mostly `pub use`, and counting those produced 124 false
+        # positives on the first tree that had one.
+        if m.group(2).strip() == 'pub':
+            continue
+        entries = imported_names(m.group(3))
         if not entries:
             continue
         line = raw[:m.start()].count('\n') + 1
