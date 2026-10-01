@@ -138,13 +138,11 @@ mod tests {
     fn backslashes_become_slashes() {
         // A backslash is not a separator on a POSIX host, so this pair shares
         // none and Node's `relative` hands the target back whole; the folds then
-        // leave `command/` no longer at the start, so nothing is stripped. On
-        // Windows the win32 branch of `path.relative` gives "plan" instead -
-        // documented divergence, not a bug in the folding itself.
-        assert_eq!(
-            command_name_from_path("C:\\base", "C:\\base\\command\\plan.md"),
-            "C:/base/command/plan.md"
-        );
+        // leave `command/` no longer at the start, so the PREFIX is not stripped.
+        // The `.md` suffix still is - the two steps are independent. On a
+        // Windows host the win32 branch of `path.relative` gives "plan"
+        // instead: documented divergence, not a bug in the folding itself.
+        assert_eq!(command_name_from_path("C:\\base", "C:\\base\\command\\plan.md"), "C:/base/command/plan");
         assert_eq!(command_name_from_path("/base", "/base/commands/a\\b.md"), "a/b");
     }
 
@@ -152,10 +150,10 @@ mod tests {
     fn a_path_outside_the_directory_still_yields_a_name() {
         // `path.relative` really does produce the `..` form, and the TS keeps
         // it: the name of a file found outside the plugin directory is its whole
-        // relative path, prefix and all. Inventing a bare suffix here would hide
-        // the very thing the caller needs to see - that the file is not where
-        // it was expected to be.
-        assert_eq!(command_name_from_path("/other", "/base/command/plan.md"), "../base/command/plan.md");
+        // relative path, prefix and all, minus the `.md`. Inventing a bare
+        // suffix here would hide the very thing the caller needs to see - that
+        // the file is not where it was expected to be.
+        assert_eq!(command_name_from_path("/other", "/base/command/plan.md"), "../base/command/plan");
     }
 
     #[test]

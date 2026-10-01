@@ -68,8 +68,11 @@ pub fn to_slashes(path: &str) -> String {
 /// The name both plugins derive, parameterised by the prefixes to strip.
 ///
 /// The order matters and is the source's: relative path, then slashes, then at
-/// most ONE leading `<prefix>/`, then at most one trailing `.md`. A name that
-/// is exactly `agent/` is left as the empty string rather than refused.
+/// most ONE leading `<prefix>/`, then at most one trailing `.md`. The two
+/// strips are independent, which is worth stating because it is easy to assume
+/// they come as a pair: a path whose prefix does not survive still loses its
+/// `.md`. A name that is exactly `agent/` keeps its prefix, since `relative`
+/// collapses the trailing slash and leaves nothing to strip.
 pub fn plugin_name(directory: &str, filepath: &str, prefixes: &[&str]) -> String {
     let mut name = to_slashes(&relative(directory, filepath));
     for prefix in prefixes {
@@ -184,14 +187,12 @@ mod tests {
     fn a_windows_shaped_path_has_no_segments_to_compare() {
         // On a POSIX host a backslash is not a separator, so `C:\base` and
         // `C:\base\agent\plan.md` share no separator and Node's `relative`
-        // returns the target whole. The backslashes are then folded to slashes,
-        // and the prefix no longer sits at the start, so nothing is stripped.
+        // returns the target whole. Folding the backslashes then puts `agent/`
+        // no longer at the start, so the PREFIX survives - while the `.md`
+        // suffix, stripped independently, does not.
         // A Windows host would use the win32 branch of `path.relative` and get
         // "plan" instead - that divergence is documented, not papered over.
-        assert_eq!(
-            plugin_name("C:\\base", "C:\\base\\agent\\plan.md", &AGENT_PREFIXES),
-            "C:/base/agent/plan.md"
-        );
+        assert_eq!(plugin_name("C:\\base", "C:\\base\\agent\\plan.md", &AGENT_PREFIXES), "C:/base/agent/plan");
     }
 
     #[test]
