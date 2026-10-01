@@ -392,7 +392,10 @@ mod tests {
     #[test]
     fn a_pattern_without_a_directory_is_just_the_star() {
         assert_eq!(normalize_path_pattern("*", W), "*");
-        assert!(normalize_path_pattern("no-star").ends_with('*'));
+        assert!(
+            normalize_path_pattern("no-star", W).ends_with('*'),
+            "a pattern with no directory still gets the star appended"
+        );
     }
 
     // --- platform ---

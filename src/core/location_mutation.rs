@@ -191,7 +191,7 @@ fn is_absolute(path: &str) -> bool {
 /// `path.resolve(base, input)`, for an input that may be absolute already.
 fn resolve_against(base: &str, input: &str) -> String {
     if is_absolute(input) {
-        return normalise(slash(input));
+        return normalise(&slash(input));
     }
     normalise(&format!("{}/{}", base.trim_end_matches(['/', '\\']), slash(input)))
 }

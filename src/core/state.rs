@@ -316,7 +316,10 @@ mod tests {
     }
 
     fn push(store: &Store<Lines>, value: &str) -> Registration {
-        store.transform(Box::new(move |state: &mut Lines| state.push(value.to_string())))
+        // Owned before the closure: `Transform` is `'static`, so a borrow of a
+        // test parameter could not outlive this function.
+        let value = value.to_string();
+        store.transform(Box::new(move |state: &mut Lines| state.push(value.clone())))
     }
 
     /// Applies the reloads a batch queued, which is what `batch` does on the way
