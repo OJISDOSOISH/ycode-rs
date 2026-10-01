@@ -63,8 +63,20 @@ impl Platform {
     }
 }
 
-/// The separator `contains` uses when rejecting a parent-relative result.
-fn sep(platform: Platform) -> &'static str {
+/// The separator `contains` compares a parent-relative result against.
+///
+/// Always `/`, and that is not an oversight. Node uses `path.sep`, because
+/// `path.relative` there returns NATIVE separators - so on Windows its result
+/// contains a backslash and comparing against `..\\` is what works. The
+/// `relative` in this module always joins with `/`, on every platform, so the
+/// check has to match the path it is handed: comparing a `/`-joined result
+/// against `..\\` never matches, and a path that climbs out of its parent
+/// would be silently reported as contained. That is a permission bug, and it
+/// would only appear on Windows - which is where this crate's CI runs.
+const SEP: &str = "/";
+
+/// The native separator, for callers that build a platform path.
+pub fn native_separator(platform: Platform) -> &'static str {
     match platform {
         Platform::Windows => "\\",
         Platform::Posix => "/",
@@ -129,7 +141,7 @@ pub fn contains(parent: &str, child: &str, platform: Platform) -> bool {
     if result == ".." {
         return false;
     }
-    !result.starts_with(&format!("..{}", sep(platform)))
+    !result.starts_with(&concat!("..", SEP))
 }
 
 /// `overlaps`: either path contains the other.
@@ -328,11 +340,18 @@ mod tests {
     }
 
     #[test]
-    fn the_windows_separator_is_used_for_the_parent_test() {
-        // A result of "..\\x" must be rejected on Windows and "..x" must not
-        // be, because the separator is what makes it a parent reference.
-        assert!(!contains("C:/base", "C:/../x", W));
+    fn the_parent_test_works_on_both_platforms() {
+        // The separator compared against is ALWAYS `/` here, because this
+        // module's `relative` always joins with `/`. Node compares against
+        // `path.sep` because its `relative` returns native separators; porting
+        // that comparison without porting that property would make every
+        // climbing path look contained on Windows - which is where this crate
+        // is tested, so the bug would be caught rather than shipped, but it
+        // would be a real one.
+        assert!(!contains("C:/base", "C:/../x", W), "a Windows climbing path is refused");
+        assert!(!contains("/base", "/base/../x", P));
         assert!(contains("C:/base", "C:/base/x", W));
+        assert!(contains("/base", "/base/x", P));
     }
 
     #[test]
@@ -414,9 +433,10 @@ mod tests {
     }
 
     #[test]
-    fn the_separator_helper_follows_the_platform() {
-        assert_eq!(sep(W), "\\");
-        assert_eq!(sep(P), "/");
+    fn the_separator_helpers_follow_the_platform() {
+        assert_eq!(native_separator(W), "\\");
+        assert_eq!(native_separator(P), "/");
+        assert_eq!(SEP, "/", "the parent check always compares against a slash");
         assert!(MAIN_SEPARATOR == '/' || MAIN_SEPARATOR == '\\');
         assert!(!host_separator().is_empty());
     }
