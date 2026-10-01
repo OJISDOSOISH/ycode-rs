@@ -20,7 +20,7 @@ use super::plugin_promise::{BoiteFutur, FuturPossede, RappelEvenement, RappelRed
 /// référence, compétence). Miroir des services `*.transform` / `*.reload` du TS.
 pub trait Domaine: Send + Sync {
     fn transforme<'a>(&'a self, rappel: RappelRedaction) -> BoiteFutur<'a, ()>;
-    fn recharge(&self) -> FuturPossede<()>;
+    fn recharge(&self) -> BoiteFutur<'_, ()>;
 }
 
 /// Sous-trait `agent` du contexte : recharge + transformation restreinte.
@@ -28,7 +28,7 @@ pub trait Domaine: Send + Sync {
 /// identifiants typés ; ici le brouillon reste effacé (`dyn Any`).
 pub trait SousDomaineAgent: Send + Sync {
     fn transforme<'a>(&'a self, rappel: RappelRedaction) -> BoiteFutur<'a, ()>;
-    fn recharge(&self) -> FuturPossede<()>;
+    fn recharge(&self) -> BoiteFutur<'_, ()>;
 }
 
 /// Hook `aisdk.sdk` : reçoit un événement (model, package, options, sdk) dont
@@ -102,7 +102,7 @@ pub struct HotePlugin {
 
 /// Vue `integration` du contexte (connection + transform + reload).
 pub trait IntegrationHote: Send + Sync {
-    fn recharge(&self) -> FuturPossede<()>;
+    fn recharge(&self) -> BoiteFutur<'_, ()>;
     fn connexion(&self) -> Arc<dyn ConnexionIntegration>;
     fn transforme<'a>(&'a self, rappel: RappelRedaction) -> BoiteFutur<'a, ()>;
     fn methodes(&self) -> Arc<dyn MethodesIntegration>;
@@ -157,7 +157,7 @@ mod tests {
                 self.rappels.lock().unwrap().push(1);
             })
         }
-        fn recharge(&self) -> FuturPossede<()> {
+        fn recharge(&self) -> BoiteFutur<'_, ()> {
             let etat = Arc::clone(&self.recharges);
             Box::pin(async move {
                 etat.lock().unwrap().push(());
@@ -176,7 +176,7 @@ mod tests {
         fn transforme<'a>(&'a self, rappel: RappelRedaction) -> BoiteFutur<'a, ()> {
             self.0.transforme(rappel)
         }
-        fn recharge(&self) -> FuturPossede<()> {
+        fn recharge(&self) -> BoiteFutur<'_, ()> {
             self.0.recharge()
         }
     }
@@ -228,7 +228,7 @@ mod tests {
     }
 
     impl IntegrationHote for IntegrationFactice {
-        fn recharge(&self) -> FuturPossede<()> {
+        fn recharge(&self) -> BoiteFutur<'_, ()> {
             Box::pin(async {})
         }
         fn connexion(&self) -> Arc<dyn ConnexionIntegration> {
@@ -269,16 +269,14 @@ mod tests {
         let rappel: RappelRedaction = Arc::new(move |brouillon: &mut dyn Any| {
             let capteur = capteur.clone();
             // `&mut dyn Any` n'est pas `Send`, et le futur le retenait, d'où
-            // « future cannot be sent between threads safely ». On lit la valeur
-            // AVANT de construire le futur, pour ne capturer qu'un `Option<u32>`,
-            // qui est `Copy` et `Send`. La sémantique est la même : si ce n'est
-            // pas un `u32`, rien n'est écrit.
-            let extrait = brouillon.downcast_mut::<u32>().map(|valeur| *valeur);
-            Box::pin(async move {
-                if let Some(valeur) = extrait {
-                    *capteur.lock().unwrap() = valeur;
-                }
-            }) as FuturPossede<()>
+            // « future cannot be sent between threads safely ». Le rappel fait une
+            // seule écriture sans suspension : elle a lieu AVANT la construction
+            // du futur, qui reste donc vide et `Send`. L appelant attend aussitot,
+            // donc le comportement observable ne change pas.
+            if let Some(valeur) = brouillon.downcast_mut::<u32>() {
+                *capteur.lock().unwrap() = *valeur;
+            }
+            Box::pin(async {}) as FuturPossede<()>
         });
         hote.agent.transforme(rappel).await;
 

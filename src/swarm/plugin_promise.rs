@@ -52,7 +52,7 @@ pub trait Domaine: Send + Sync {
     /// Enregistre une transformation ; l'enregistrement rendu se dispose avec le scope.
     fn transforme<'a>(&'a self, rappel: RappelRedaction) -> BoiteFutur<'a, Enregistrement>;
     /// Recharge le domaine (coalescé côté hôte, comme le batching Effect du TS).
-    fn recharge(&self) -> FuturPossede<()>;
+    fn recharge(&self) -> BoiteFutur<'_, ()>;
 }
 
 /// Sous-trait de connexion d'intégration.
@@ -85,19 +85,24 @@ pub struct DomaineEtReload<'a> {
 
 impl<'a> DomaineEtReload<'a> {
     /// Équivalent de `transform(domaine)` du TS : enregistre et résout à l'inscription.
-    pub fn transforme(&self, rappel: RappelRedaction) -> FuturPossede<Enregistrement> {
+    ///
+    /// Le retour est borné par `'a`, la durée de vie du domaine emprunté, et non
+    /// `'static`. Un `FuturPossede` exigirait que l'hôte vive pour toujours, ce
+    /// qui n est pas vrai : le contexte ne vaut que pendant le `setup`.
+    pub fn transforme(&self, rappel: RappelRedaction) -> BoiteFutur<'a, Enregistrement> {
         let domaine = Arc::clone(&self.transformation);
         Box::pin(async move { domaine.transforme(rappel).await })
     }
 
-    pub fn recharge(&self) -> FuturPossede<()> {
-        self.transformation.recharge()
+    pub fn recharge(&self) -> BoiteFutur<'a, ()> {
+        let domaine = Arc::clone(&self.transformation);
+        Box::pin(async move { domaine.recharge().await })
     }
 }
 
 pub struct Aisdk<'a> {
-    pub sdk: Arc<dyn Fn(RappelEvenement) -> FuturPossede<Enregistrement> + Send + Sync + 'a>,
-    pub language: Arc<dyn Fn(RappelEvenement) -> FuturPossede<Enregistrement> + Send + Sync + 'a>,
+    pub sdk: Arc<dyn Fn(RappelEvenement) -> BoiteFutur<'a, Enregistrement> + Send + Sync + 'a>,
+    pub language: Arc<dyn Fn(RappelEvenement) -> BoiteFutur<'a, Enregistrement> + Send + Sync + 'a>,
 }
 
 pub struct Integration<'a> {
@@ -109,25 +114,27 @@ pub struct Integration<'a> {
 }
 
 impl<'a> Integration<'a> {
-    pub fn transforme(&self, rappel: RappelRedaction) -> FuturPossede<Enregistrement> {
+    pub fn transforme(&self, rappel: RappelRedaction) -> BoiteFutur<'a, Enregistrement> {
         self.transformation.transforme(rappel)
     }
 
-    pub fn recharge(&self) -> FuturPossede<()> {
+    pub fn recharge(&self) -> BoiteFutur<'a, ()> {
         self.transformation.recharge()
     }
 }
 
 pub struct GestionPlugins<'a> {
     /// Ajoute un sous-plugin ; il est lui-même adapté via `depuis_promesse`.
-    pub ajoute: Arc<dyn Fn(Arc<dyn PluginPromesse>) -> FuturPossede<()> + Send + Sync + 'a>,
-    pub supprime: Arc<dyn Fn(&str) -> FuturPossede<()> + Send + Sync + 'a>,
+    pub ajoute: Arc<dyn Fn(Arc<dyn PluginPromesse>) -> BoiteFutur<'a, ()> + Send + Sync + 'a>,
+    pub supprime: Arc<dyn Fn(&str) -> BoiteFutur<'a, ()> + Send + Sync + 'a>,
 }
 
 /// Plugin côté « Promise » : id + installation asynchrone (`Plugin` du TS).
 pub trait PluginPromesse: Send + Sync {
     fn id(&self) -> &str;
-    fn installation(&self, contexte: ContextePlugin<'_>) -> FuturPossede<()>;
+    /// Le contexte et `self` sont empruntes pour toute la duree du `setup`, donc
+    /// le futur rendu est borne par la meme duree de vie, pas par `'static`.
+    fn installation<'b>(&'b self, contexte: ContextePlugin<'b>) -> BoiteFutur<'b, ()>;
 }
 
 /// Plugin côté « Effect » : ce que consomme le chargeur (`define` du TS).
@@ -143,14 +150,14 @@ pub trait PluginEffet: Send + Sync {
 pub trait HoteEffet: Send + Sync {
     fn options(&self) -> Arc<dyn Any + Send + Sync>;
     fn agent(&self) -> &dyn Domaine;
-    fn aisdk_sdk(&self, rappel: RappelEvenement) -> FuturPossede<Enregistrement>;
-    fn aisdk_language(&self, rappel: RappelEvenement) -> FuturPossede<Enregistrement>;
+    fn aisdk_sdk(&self, rappel: RappelEvenement) -> BoiteFutur<'_, Enregistrement>;
+    fn aisdk_language(&self, rappel: RappelEvenement) -> BoiteFutur<'_, Enregistrement>;
     fn catalogue(&self) -> &dyn Domaine;
     fn commande(&self) -> &dyn Domaine;
     fn integration(&self) -> &dyn Domaine;
     fn connexion_integration(&self) -> Arc<dyn ConnexionIntegration>;
-    fn plugin_ajoute(&self, adapte: Arc<dyn PluginEffet>) -> FuturPossede<()>;
-    fn plugin_supprime(&self, id: &str) -> FuturPossede<()>;
+    fn plugin_ajoute(&self, adapte: Arc<dyn PluginEffet>) -> BoiteFutur<'_, ()>;
+    fn plugin_supprime(&self, id: &str) -> BoiteFutur<'_, ()>;
     fn reference(&self) -> &dyn Domaine;
     fn competence(&self) -> &dyn Domaine;
 }
@@ -181,11 +188,15 @@ unsafe impl<'a> Send for EmpruntDomaine<'a> {}
 unsafe impl<'a> Sync for EmpruntDomaine<'a> {}
 
 impl<'a> Domaine for EmpruntDomaine<'a> {
-    fn transforme<'a>(&'a self, rappel: RappelRedaction) -> BoiteFutur<'a, Enregistrement> {
+    // The method re-declares a lifetime, and the trait does the same. Naming it
+    // `'a` again shadowed the impl's own `'a` (E0496), and that shadowing is
+    // what made the two signatures read as different (E0308 x2). A different
+    // name, and the shadowing is gone.
+    fn transforme<'b>(&'b self, rappel: RappelRedaction) -> BoiteFutur<'b, Enregistrement> {
         let domaine: &dyn Domaine = unsafe { &*self.ptr };
         Box::pin(async move { domaine.transforme(rappel).await })
     }
-    fn recharge(&self) -> FuturPossede<()> {
+    fn recharge(&self) -> BoiteFutur<'a, ()> {
         let domaine: &dyn Domaine = unsafe { &*self.ptr };
         Box::pin(async move { domaine.recharge().await })
     }
@@ -273,7 +284,7 @@ mod tests {
             })
         }
 
-        fn recharge(&self) -> FuturPossede<()> {
+        fn recharge(&self) -> BoiteFutur<'_, ()> {
             Box::pin(async move {
                 *self.recharge_effectuees.lock().unwrap() += 1;
             })
@@ -303,10 +314,10 @@ mod tests {
         fn agent(&self) -> &dyn Domaine {
             &*self.agent
         }
-        fn aisdk_sdk(&self, _rappel: RappelEvenement) -> FuturPossede<Enregistrement> {
+        fn aisdk_sdk(&self, _rappel: RappelEvenement) -> BoiteFutur<'_, Enregistrement> {
             Box::pin(async { Enregistrement::nouveau(|| Box::pin(async {}) as FuturPossede<()>) })
         }
-        fn aisdk_language(&self, _rappel: RappelEvenement) -> FuturPossede<Enregistrement> {
+        fn aisdk_language(&self, _rappel: RappelEvenement) -> BoiteFutur<'_, Enregistrement> {
             Box::pin(async { Enregistrement::nouveau(|| Box::pin(async {}) as FuturPossede<()>) })
         }
         fn catalogue(&self) -> &dyn Domaine {
@@ -321,7 +332,7 @@ mod tests {
         fn connexion_integration(&self) -> Arc<dyn ConnexionIntegration> {
             Arc::new(ConnexionFactice)
         }
-        fn plugin_ajoute(&self, adapte: Arc<dyn PluginEffet>) -> FuturPossede<()> {
+        fn plugin_ajoute(&self, adapte: Arc<dyn PluginEffet>) -> BoiteFutur<'_, ()> {
             Box::pin(async move {
                 self.plugins_ajoutes
                     .lock()
@@ -329,7 +340,7 @@ mod tests {
                     .push(adapte.id().to_string());
             })
         }
-        fn plugin_supprime(&self, _id: &str) -> FuturPossede<()> {
+        fn plugin_supprime(&self, _id: &str) -> BoiteFutur<'_, ()> {
             Box::pin(async {})
         }
         fn reference(&self) -> &dyn Domaine {
@@ -351,14 +362,20 @@ mod tests {
             "factice"
         }
 
-        fn installation(&self, contexte: ContextePlugin) -> FuturPossede<()> {
+        fn installation<'b>(&'b self, contexte: ContextePlugin<'b>) -> BoiteFutur<'b, ()> {
             Box::pin(async move {
                 let rappel: RappelRedaction = Arc::new(|brouillon: &mut dyn Any| {
-                    Box::pin(async move {
-                        if let Some(valeur) = brouillon.downcast_mut::<u32>() {
-                            *valeur += 1;
-                        }
-                    }) as FuturPossede<()>
+                    // `&mut dyn Any` n'est pas `Send` : `dyn Any` nu n'est ni
+                    // Send ni Sync, et le futur le retenait, d'où « future cannot
+                    // be sent between threads safely ». Le rappel ne fait qu'une
+                    // mutation sans suspension, donc elle est faite AVANT de
+                    // batir le futur : le futur est vide, donc `Send`, et le
+                    // comportement observable est le même puisque l'appelant
+                    // attend aussitot.
+                    if let Some(valeur) = brouillon.downcast_mut::<u32>() {
+                        *valeur += 1;
+                    }
+                    Box::pin(async {}) as FuturPossede<()>
                 });
                 let enregistrement = contexte.agent.transforme(rappel).await;
                 // Le dispose doit être câblé et appelable.
