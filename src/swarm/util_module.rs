@@ -533,6 +533,11 @@ mod tests {
         p.to_string_lossy().replace('\\', "/")
     }
 
+    /// Normalise le résultat de resolve pour comparaison cross-platform.
+    fn norm_resolve(res: Option<String>) -> Option<String> {
+        res.map(|s| s.replace('\\', "/"))
+    }
+
     /// Compteur de suffixe, pour que deux tests n obtiennent pas le meme
     /// repertoire temporaire.
     static COMPTEUR: AtomicUsize = AtomicUsize::new(0);
@@ -870,7 +875,7 @@ mod tests {
 
     // --- Partie disque : les quatre cas du fichier de tests du depot ---
 
-    #[test]
+#[test]
     fn resolves_a_package_subpath() {
         // `packages/opencode/test/util/module.test.ts:15`.
         let tmp = Tmp::nouveau("subpath");
@@ -880,9 +885,7 @@ mod tests {
             "proj/node_modules/typescript/package.json",
             r#"{"name":"typescript"}"#,
         );
-        assert_eq!(resolve("typescript/lib/tsserver.js", &root.to_string_lossy()), Some(
-            norm(&file)
-        ));
+        assert_eq!(norm_resolve(resolve("typescript/lib/tsserver.js", &root.to_string_lossy())), Some(norm(&file)));
     }
 
     #[test]
@@ -900,7 +903,7 @@ mod tests {
             r#"{"name":"eslint","main":"lib/api.js"}"#,
         );
         assert_eq!(
-            resolve("eslint", &cwd.to_string_lossy()),
+            norm_resolve(resolve("eslint", &cwd.to_string_lossy())),
             Some(norm(&file))
         );
     }
@@ -920,8 +923,8 @@ mod tests {
         tmp.json("a/node_modules/biome/package.json", manifeste);
         tmp.json("b/node_modules/biome/package.json", manifeste);
 
-        let gauche_obtenu = resolve("biome", &a.to_string_lossy());
-        let droite_obtenu = resolve("biome", &b.to_string_lossy());
+        let gauche_obtenu = norm_resolve(resolve("biome", &a.to_string_lossy()));
+        let droite_obtenu = norm_resolve(resolve("biome", &b.to_string_lossy()));
         assert_eq!(gauche_obtenu, Some(norm(&gauche)));
         assert_eq!(droite_obtenu, Some(norm(&droite)));
         assert_ne!(gauche_obtenu, droite_obtenu);
@@ -975,7 +978,7 @@ mod tests {
         );
         tmp.fichier("p/node_modules/pkg/index.js", "y");
         assert_eq!(
-            resolve("pkg", &tmp.chemin().join("p").to_string_lossy()),
+            norm_resolve(resolve("pkg", &tmp.chemin().join("p").to_string_lossy())),
             Some(norm(&main))
         );
     }
@@ -1001,12 +1004,12 @@ mod tests {
             r#"{"name":"vide","main":""}"#,
         );
         let p = tmp.chemin().join("p").to_string_lossy().into_owned();
-        assert_eq!(resolve("sans", &p), Some(norm(&index)));
+        assert_eq!(norm_resolve(resolve("sans", &p)), Some(norm(&index)));
         assert_eq!(
-            resolve("fantome", &p),
+            norm_resolve(resolve("fantome", &p)),
             Some(norm(&fantome))
         );
-        assert_eq!(resolve("vide", &p), Some(norm(&vide)));
+        assert_eq!(norm_resolve(resolve("vide", &p)), Some(norm(&vide)));
     }
 
     #[test]
@@ -1019,7 +1022,7 @@ mod tests {
         tmp.fichier("p/node_modules/pkg/package.json", "{ ceci n est pas du json");
         let p = tmp.chemin().join("p").to_string_lossy().into_owned();
         assert_eq!(
-            resolve("pkg", &p),
+            norm_resolve(resolve("pkg", &p)),
             Some(norm(&index))
         );
     }
@@ -1042,7 +1045,7 @@ mod tests {
         let file = tmp.fichier("p/node_modules/pkg/index.js", "x");
         let p = tmp.chemin().join("p").to_string_lossy().into_owned();
         let attendu = Some(norm(&file));
-        assert_eq!(resolve("pkg", &p), attendu);
-        assert_eq!(resolve("pkg", &p), attendu, "deux appels, meme reponse");
+        assert_eq!(norm_resolve(resolve("pkg", &p)), attendu);
+        assert_eq!(norm_resolve(resolve("pkg", &p)), attendu, "deux appels, meme reponse");
     }
 }
