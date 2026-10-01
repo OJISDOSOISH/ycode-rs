@@ -32,7 +32,11 @@
 //! and a Windows run with `\`. The trailing `*` is appended after the join in
 //! both, so the pattern ends up `/dir/*` on POSIX and `\dir\*` on Windows.
 
-use std::path::{MAIN_SEPARATOR, MAIN_SEPARATOR_STR};
+use std::path::MAIN_SEPARATOR_STR;
+
+// `MAIN_SEPARATOR` is referenced by a test only, so importing it here would be
+// an unused import in the library build - the same trap as the other five I hit
+// earlier. The test module imports it itself.
 
 /// The `platform` the TS reads from `process.platform`.
 ///
@@ -232,6 +236,7 @@ pub fn host_separator() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::MAIN_SEPARATOR;
 
     const W: Platform = Platform::Windows;
     const P: Platform = Platform::Posix;
