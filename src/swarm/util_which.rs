@@ -289,6 +289,9 @@ pub fn parse_path_ext(value: &str) -> Vec<String> {
 /// the middle of the combining sequence. This version walks the two strings in
 /// reverse by character and simply stops when one runs out.
 pub fn ends_with_ignore_ascii_case(value: &str, suffix: &str) -> bool {
+    if suffix.is_empty() {
+        return true;
+    }
     let mut left = value.chars().rev();
     let mut right = suffix.chars().rev();
     loop {
@@ -298,8 +301,8 @@ pub fn ends_with_ignore_ascii_case(value: &str, suffix: &str) -> bool {
                     return false;
                 }
             }
-            (None, None) => return true,
-            _ => return false,
+            (_, None) => return true,  // suffix fully matched
+            (None, Some(_)) => return false,  // value exhausted before suffix
         }
     }
 }
