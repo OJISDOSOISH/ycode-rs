@@ -803,8 +803,8 @@ mod tests {
             verbosity: Some("low".to_string()),
             thinking_budget: Some(2048.0),
             messages: vec![],
-            tools: None,
-            tool_choice: None,
+            tools: Some(json!([{ "type": "function" }])),
+            tool_choice: Some(json!("auto")),
             extras: BTreeMap::new(),
         };
         let corps = serde_json::to_value(&args).unwrap();
@@ -820,6 +820,17 @@ mod tests {
         assert!(corps["thinking_budget"].is_number());
         assert!(corps["response_format"]["json_schema"]["schema"].is_object());
         assert_eq!(corps["response_format"]["type"], json!("json_schema"));
+
+        // Une option a None disparait du corps, comme le `undefined` que
+        // `JSON.stringify` laisse tomber cote TS.
+        let sans_outils = ArgsRequeteChat {
+            tools: None,
+            tool_choice: None,
+            ..args
+        };
+        let corps = serde_json::to_value(&sans_outils).unwrap();
+        assert!(corps.get("tools").is_none());
+        assert!(corps.get("tool_choice").is_none());
     }
 
     #[test]
