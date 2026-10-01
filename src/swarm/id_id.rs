@@ -392,13 +392,15 @@ pub fn descending(kind: Prefix, given: Option<&str>) -> Result<String, PrefixMis
 /// for a hand-written id containing a character outside the basic multilingual
 /// plane.
 pub fn timestamp(id: &str) -> Result<i64, TimestampError> {
-    let prefix_length = id.split('_').next().unwrap_or("").chars().count();
-    let start = prefix_length.saturating_add(1);
-    let end = prefix_length.saturating_add(TIME_SLICE_END);
+    // Find the first underscore byte to locate the prefix boundary.
+    // This uses byte offsets to match String::get semantics.
+    let prefix_end = id.find('_').unwrap_or(id.len());
+    let start = prefix_end.saturating_add(1);
+    let end = start.saturating_add(TIME_HEX_LENGTH);
 
     // `String::get` returns `None` rather than panicking; the `None` arm is
-    // unreachable given the char-based offsets, and is kept as a hard floor so
-    // this function can never panic.
+    // unreachable given the bounds, and is kept as a hard floor so this
+    // function can never panic.
     let payload = id.get(start..end).unwrap_or("");
 
     if payload.is_empty() {
@@ -732,7 +734,7 @@ mod tests {
 
     #[test]
     fn timestamp_reads_twelve_characters_and_no_more() {
-        assert_eq!(TIME_SLICE_END, TIME_HEX_LENGTH + 1);
+        assert_eq!(TIME_SLICE_END, TIME_HEX_LENGTH);
         // Fourteen trailing hex characters must not leak into the value: the
         // thirteenth one is the first character of the random tail.
         let id = format!("ses_{:012x}ffff", TS * 0x1000);

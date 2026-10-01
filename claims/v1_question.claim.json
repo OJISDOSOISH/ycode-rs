@@ -1,0 +1,1 @@
+{"owner":"cline","started":"2026-10-01T11:25:29Z","source":"packages/schema/src/v1/question.ts","target":"src/schema/v1_question.rs","status":"ports-written","rule7_left_out":"Effect Layer wiring for live question dispatch","tests":"5 Rule-5 shape tests: wire names exact (sessionID/requestID/callID), optionals disappear"}

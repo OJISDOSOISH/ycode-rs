@@ -1,0 +1,1 @@
+{"owner":"cline","started":"2026-10-01T11:25:29Z","source":"packages/core/src/permission/saved.ts","target":"src/core/permission_saved.rs","status":"ports-written","rule7_left_out":"Effect Layer, Database.Service, Drizzle query builders","deps_not_in_batch":"packages/schema/src/permission-saved.ts (ID+Info treated as opaque aliases)"}

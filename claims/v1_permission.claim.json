@@ -1,0 +1,1 @@
+{"owner":"cline","started":"2026-10-01T11:25:29Z","source":"packages/schema/src/v1/permission.ts","target":"src/schema/v1_permission.rs","status":"ports-written","rule7_left_out":"Effect Layer wiring for live permission service","tests":"9 Rule-5 shape tests: wire names exact, optionals disappear at None, enum lowercase, id prefix validation"}
