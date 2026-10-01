@@ -473,9 +473,13 @@ mod tests {
 
     #[test]
     fn the_head_gets_the_odd_byte_of_an_odd_budget() {
+        // Seven bytes: the head takes four (ceil) from the front, the tail takes
+        // three (floor) from the back. The two sums to seven, and the tail is
+        // the END of the text, not the three bytes following the head.
         let p = preview("abcdefghij", 100, 7);
         assert_eq!(p.head, "abcd", "ceil(7/2) = 4 bytes from the front");
-        assert_eq!(p.tail, "defghij", "floor(7/2) = 3 bytes, taken from the END");
+        assert_eq!(p.tail, "hij", "floor(7/2) = 3 bytes from the end");
+        assert_eq!(p.head.len() + p.tail.len(), 7, "the odd byte goes to the head");
     }
 
     #[test]
