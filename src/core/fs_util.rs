@@ -215,29 +215,43 @@ pub fn windows_path(p: &str, platform: Platform) -> String {
 }
 
 /// Rewrites `/<drive>:` and `/<drive>` at the start, when `colon` selects which.
+///
+/// Two details of the TypeScript regex, both of which this got wrong.
+///
+/// The regex CONSUMES the separator it matched. `^\/([a-zA-Z]):(?:[\\/]|$)` is
+/// replaced by `C:/`, and the separator that followed the colon is part of what
+/// the match removed - so `/c:/x` becomes `C:/x` and not `C://x`. Emitting the
+/// built prefix and then appending the tail INCLUDING its leading separator gave
+/// a doubled separator on every one of the four prefixes.
+///
+/// And the alternation ends in `$`, so a drive with nothing after it matches too:
+/// `/c` and `/c:` are both rewritten, to `C:/`. Requiring three bytes rejected
+/// `/c`, which came back untouched - a bare drive is a legitimate thing for a
+/// permission root to be, so it is not an exotic input.
 fn replace_drive(input: &str, colon: bool, build: impl Fn(char) -> String) -> String {
     let bytes = input.as_bytes();
-    if bytes.len() < 3 || bytes[0] != b'/' || !bytes[1].is_ascii_alphabetic() {
+    if bytes.len() < 2 || bytes[0] != b'/' || !bytes[1].is_ascii_alphabetic() {
         return input.to_string();
     }
+    let drive = input[1..2].chars().next().unwrap();
     if colon {
-        if bytes[2] != b':' {
+        if bytes.get(2) != Some(&b':') {
             return input.to_string();
         }
         // The character after the colon must be a separator or the end.
-        let after = bytes.get(3);
-        if !(after.is_none() || matches!(after, Some(b'/') | Some(b'\\'))) {
+        if !matches!(bytes.get(3), None | Some(b'/') | Some(b'\\')) {
             return input.to_string();
         }
-        let drive = input[1..2].chars().next().unwrap();
-        return format!("{}{}", build(drive), &input[3..]);
+        // Skip the separator the match consumed, if there was one.
+        let tail = input[3..].strip_prefix(['/', '\\']).unwrap_or(&input[3..]);
+        return format!("{}{}", build(drive), tail);
     }
     // No colon: the next character must be a separator or the end.
     if !matches!(bytes.get(2), None | Some(b'/')) {
         return input.to_string();
     }
-    let drive = input[1..2].chars().next().unwrap();
-    format!("{}{}", build(drive), &input[2..])
+    let tail = input[2..].strip_prefix('/').unwrap_or(&input[2..]);
+    format!("{}{}", build(drive), tail)
 }
 
 fn replace_prefixed_drive(input: &str, prefix: &str, build: impl Fn(char) -> String) -> String {
@@ -255,6 +269,9 @@ fn replace_prefixed_drive(input: &str, prefix: &str, build: impl Fn(char) -> Str
     if !(tail.is_empty() || tail.starts_with('/')) {
         return input.to_string();
     }
+    // Same as in `replace_drive`: the separator belongs to the match, not to the
+    // tail, and `build` already ends with one.
+    let tail = tail.strip_prefix('/').unwrap_or(tail);
     format!("{}{}", build(drive), tail)
 }
 
@@ -389,8 +406,17 @@ mod tests {
     fn a_colon_is_an_ordinary_character_in_a_posix_segment() {
         // Why `has_root` does not look for a colon on POSIX: `weird:name` is a
         // legal relative path there, and the first draft treated it as rooted.
-        assert_eq!(relative("a:b", "a:c", P), "c");
-        assert!(contains("/base", "weird:name", P));
+        // `a:b` and `a:c` are two different single-segment NAMES, not a parent
+        // and a child: neither is rooted, they share no leading segment, so
+        // `relative` returns the target unchanged. A bare relative name is not
+        // inside an absolute root either - `contains` is asked about `/base`
+        // here, and `weird:name` climbs out of it.
+        assert_eq!(relative("a:b", "a:c", P), "a:c");
+        assert!(!contains("/base", "weird:name", P), "a bare name is not inside /base");
+        // The contrast that shows the colon is what stopped it rooting: with a
+        // drive-shaped second segment the Windows rule applies and it IS rooted.
+        assert_eq!(relative("x", "C:b", W), "../C:b");
+        assert_eq!(relative("x", "C:b", P), "C:b", "POSIX reads the colon as part of the name");
     }
 
     #[test]
@@ -417,10 +443,45 @@ mod tests {
 
     #[test]
     fn all_four_drive_prefixes_become_the_same_uppercase_drive() {
+        // These four are the only prefixes the TypeScript rewrites, and each one
+        // CONSUMES the separator it matched - which is why none of them may come
+        // back with a doubled slash. Every expectation below was checked against
+        // the four regexes themselves, not against my reading of them: the first
+        // draft emitted the built prefix and then appended a tail that still
+        // began with the separator, and CI caught it as `C://x`.
         assert_eq!(windows_path("/c:/x", W), "C:/x");
         assert_eq!(windows_path("/c/x", W), "C:/x");
         assert_eq!(windows_path("/cygdrive/c/x", W), "C:/x");
         assert_eq!(windows_path("/mnt/c/x", W), "C:/x");
+    }
+
+    #[test]
+    fn a_bare_drive_and_a_trailing_separator_both_work() {
+        // The alternation in each regex ends in `$`, so a drive with nothing
+        // after it matches too. Requiring three bytes rejected `/c` outright,
+        // which matters because a bare drive is a perfectly ordinary thing for a
+        // permission root to be.
+        assert_eq!(windows_path("/c", W), "C:/");
+        assert_eq!(windows_path("/c:", W), "C:/");
+        assert_eq!(windows_path("/z", W), "Z:/");
+        assert_eq!(windows_path("/cygdrive/c", W), "C:/");
+        assert_eq!(windows_path("/mnt/c", W), "C:/");
+        assert_eq!(windows_path("/c/", W), "C:/");
+    }
+
+    #[test]
+    fn only_the_matched_prefix_is_rewritten() {
+        assert_eq!(windows_path("/mnt/z/x/y", W), "Z:/x/y", "the tail is kept");
+        assert_eq!(windows_path("/cygdrive/c/deep/path", W), "C:/deep/path");
+        assert_eq!(windows_path("/cat", W), "/cat", "a directory named cat, not the C drive");
+        assert_eq!(windows_path("/c:x", W), "/c:x", "a colon that is not followed by a separator");
+        assert_eq!(windows_path("/1:/x", W), "/1:/x", "a digit is not a drive letter");
+        assert_eq!(windows_path("/cygdrive/1/x", W), "/cygdrive/1/x");
+        assert_eq!(windows_path("/mnt/", W), "/mnt/", "no drive letter after the prefix");
+        assert_eq!(windows_path("C:/already", W), "C:/already", "already a Windows path");
+        assert_eq!(windows_path("", W), "");
+        assert_eq!(windows_path("/", W), "/");
+        assert_eq!(windows_path("relative/path", W), "relative/path");
     }
 
     #[test]

@@ -43,7 +43,15 @@ use serde::{Deserialize, Serialize};
 pub const GITHUB_BASE_ENV: &str = "OPENCODE_REPO_CLONE_GITHUB_BASE_URL";
 
 /// The three refusals, as their tagged shapes.
+///
+/// `#[serde(tag = "_tag")]` is what makes this match the wire. Each of these is a
+/// `Schema.TaggedErrorClass("RepositoryInvalidBranchError", { branch, message })`,
+/// and that serialises to `_tag` ALONGSIDE the fields, flat. Without the
+/// attribute serde uses its default EXTERNAL tagging and emits
+/// `{"InvalidBranch": {...}}` - the variant name as a key, and no `_tag` at all,
+/// so a consumer matching on the tag would never match anything.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "_tag")]
 pub enum RepositoryError {
     #[serde(rename = "RepositoryInvalidReferenceError")]
     InvalidReference { repository: String, message: String },
@@ -646,8 +654,23 @@ mod tests {
 
     #[test]
     fn owner_is_present_only_for_two_segments() {
+        // Two segments, and the owner is the first of them. `owner/repo` is
+        // accepted as a bare reference because that form wants exactly two.
         assert_eq!(p("owner/repo").owner.as_deref(), Some("owner"));
-        assert_eq!(p("group/sub/repo").owner, None);
+        // Three BARE segments do not parse at all: the bare form needs exactly
+        // two, and taking the other branch needs a host-like first segment. So
+        // three of them reach `new URL(...)`, which throws, and `parse` returns
+        // nothing. The first draft asserted `owner == None` here, which quietly
+        // required a successful parse that never happens - CI caught it.
+        assert!(parse("group/sub/repo").is_none(), "three bare segments throw in new URL");
+        // With a host-like first segment three segments DO parse, and the owner
+        // is gone - it exists only when there are exactly two.
+        let three = p("host.io/group/sub/repo");
+        assert_eq!(three.owner, None);
+        assert_eq!(three.segments, vec!["group", "sub", "repo"]);
+        assert_eq!(three.repo, "repo");
+        assert_eq!(three.path, "group/sub/repo");
+        assert_eq!(three.host, "host.io");
     }
 
     #[test]
@@ -669,9 +692,31 @@ mod tests {
 
     #[test]
     fn a_single_segment_host_has_no_owner() {
-        // `host.io/a` has two segments, so the first IS the owner.
-        assert_eq!(p("host.io/a").owner.as_deref(), Some("host.io"));
-        assert_eq!(p("host.io/a").repo, "a");
+        // `host.io/a` splits into two segments, but the FIRST one is the HOST, and
+        // `buildRemote` is handed `direct.slice(1)` - so the reference has exactly
+        // one segment and `owner`, which is `segments[0]` only when there are two,
+        // is absent. The host is not the owner. CI caught this: the first draft
+        // asserted `Some("host.io")`, reading the host as if it were the owner.
+        let r = p("host.io/a");
+        assert_eq!(r.host, "host.io");
+        assert_eq!(r.segments, vec!["a"]);
+        assert_eq!(r.owner, None, "one segment means no owner");
+        assert_eq!(r.repo, "a");
+        // Two segments DO give an owner, and it is the first of them.
+        let two = p("host.io/owner/repo");
+        assert_eq!(two.owner.as_deref(), Some("owner"));
+        assert_eq!(two.repo, "repo");
+    }
+
+    #[test]
+    fn three_segments_are_not_a_bare_reference() {
+        // `direct.length >= 2 && hostLike(direct[0])` needs a host-like first
+        // segment, and the bare two-segment form needs exactly two. So three bare
+        // segments reach `new URL(...)`, which throws, and `parse` returns
+        // nothing. The first draft asserted a parse here and CI disagreed.
+        assert!(parse("group/sub/repo").is_none());
+        assert!(parse("host/a/b").is_none());
+        assert_eq!(p("host.io/group/sub/repo").owner, None, "three segments means no owner");
     }
 
     #[test]
@@ -684,11 +729,15 @@ mod tests {
 
     #[test]
     fn the_serde_shape_omits_an_absent_owner() {
-        let r = p("host.io/a/b");
-        let v = serde_json::to_value(&r).unwrap();
-        assert!(v.get("owner").is_none(), "three segments means no owner");
-        let two = serde_json::to_value(&p("host.io/a")).unwrap();
-        assert!(two.get("owner").is_none(), "a bare host with one segment has no owner either");
+        // `host.io/a/b` has segments ["a", "b"] - the host is stripped by
+        // `slice(1)` - so there ARE two and the owner is present. Asserting its
+        // absence is what CI flagged. The absent case is the one-segment one.
+        let two_segments = serde_json::to_value(&p("host.io/owner/repo")).unwrap();
+        assert_eq!(two_segments["owner"], serde_json::json!("owner"));
+        let one = serde_json::to_value(&p("host.io/a")).unwrap();
+        assert!(one.get("owner").is_none(), "one segment means no owner");
+        assert_eq!(one["repo"], serde_json::json!("a"));
+        assert_eq!(one["host"], serde_json::json!("host.io"));
     }
 
     #[test]

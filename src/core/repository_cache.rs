@@ -98,7 +98,16 @@ pub enum CacheError {
     ResetFailed { repository: String, message: String },
     /// The only one carrying a local path and no repository.
     #[serde(rename = "RepositoryCacheLockFailedError")]
-    LockFailed { local_path: String, message: String },
+    LockFailed {
+        /// `localPath` in the TypeScript. Every other field of this enum is a
+        /// single word, so this is the only place the snake_case convention and
+        /// the wire name part company - and a reader of `local_path` has no way
+        /// to know that, which is why the rename is spelled out here rather than
+        /// left to a blanket `rename_all`.
+        #[serde(rename = "localPath")]
+        local_path: String,
+        message: String,
+    },
     /// The only one carrying an operation and a path.
     #[serde(rename = "RepositoryCacheOperationError")]
     Operation { operation: String, path: String, message: String },
@@ -242,10 +251,24 @@ mod tests {
         assert_eq!(v["branch"], serde_json::json!("main"));
         assert_eq!(v["repository"], serde_json::json!("r"));
 
+        // The tag is asserted here too, because the field names were right and
+        // only the tag was missing once already: the assertion that failed first
+        // read a field that had been renamed, which is a quieter mistake than a
+        // wrong tag and needs a different check.
+        assert_eq!(checkout["_tag"], serde_json::json!("RepositoryCacheCheckoutFailedError"));
+
+        // `localPath` on the wire, `local_path` in Rust. Every other field in
+        // this enum is one word, so nothing else here depends on the convention.
         let lock = CacheError::LockFailed { local_path: "/p".into(), message: "m".into() };
         let v = serde_json::to_value(&lock).unwrap();
+        assert_eq!(v["_tag"], serde_json::json!("RepositoryCacheLockFailedError"));
         assert_eq!(v["localPath"], serde_json::json!("/p"));
         assert!(v.get("repository").is_none(), "the lock error has no repository");
+
+        // And the other direction: a consumer reading our output gets the same
+        // variant back, with the same field name.
+        let back: CacheError = serde_json::from_value(v).unwrap();
+        assert_eq!(back, lock);
     }
 
     #[test]

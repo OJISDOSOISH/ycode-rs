@@ -430,7 +430,22 @@ mod tests {
             seen_b.lock().unwrap().push(state.len());
             state.push("b".to_string());
         }));
-        assert_eq!(*seen.lock().unwrap(), vec![0, 1]);
+        // THREE observations, not two, and the count is the whole lesson.
+        // Registering a transform reloads straight away, so A runs once on its own
+        // registration - seeing an empty base. Registering B then replays BOTH
+        // from a FRESH base, so A runs a second time, again seeing zero, and only
+        // then B runs and sees A's one line.
+        //
+        //   A on its own registration   -> sees 0
+        //   A replayed for B            -> sees 0   (fresh base, not A's last state)
+        //   B after A                   -> sees 1
+        //
+        // The first draft of this test expected [0, 1] and CI produced [0, 0, 1].
+        // The implementation was right: it had forgotten that registration itself
+        // reloads. The third entry is the claim that matters - B sees A's output -
+        // and it is only visible because A ran twice first.
+        assert_eq!(*seen.lock().unwrap(), vec![0, 0, 1]);
+        assert_eq!(s.get(), Some(vec!["a".into(), "b".into()]));
     }
 
     #[test]

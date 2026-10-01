@@ -47,36 +47,54 @@ pub const UTF8_BOM: [u8; 3] = [0xef, 0xbb, 0xbf];
 /// The BOM as a character.
 pub const BOM_CHAR: char = '\u{feff}';
 
-/// `StaleContentError`.
+/// `StaleContentError` and `TargetExistsError`, as one internally tagged enum.
+///
+/// `Schema.TaggedErrorClass("FileMutation.StaleContentError", { path })` takes
+/// the tag as its first argument and the fields as one object, and the wire shape
+/// is those two merged FLAT: `_tag` alongside the fields. That is exactly what
+/// `#[serde(tag = "_tag")]` on an enum produces, so that is what this is.
+///
+/// The first draft modelled each error as a STRUCT with a `tag` field and
+/// `#[serde(tag = "_tag")]` on the struct. Serde accepts that attribute on a
+/// struct and ignores it - `tag` only means anything on an enum - so the tag
+/// never reached the wire under that key. `repository.rs` and
+/// `repository_cache.rs` already used the enum form, which is how the odd one out
+/// became visible.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "_tag")]
-pub struct StaleContentError {
-    #[serde(rename = "FileMutationStaleContentError")]
-    pub tag: StaleContentErrorTag,
-    pub path: String,
+pub enum FileMutationError {
+    #[serde(rename = "FileMutation.StaleContentError")]
+    StaleContent {
+        /// The path whose on-disk content no longer matched.
+        path: String,
+    },
+    #[serde(rename = "FileMutation.TargetExistsError")]
+    TargetExists {
+        /// The path that already exists.
+        path: String,
+    },
 }
 
-/// The tag, as its own type so it cannot be mistyped.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum StaleContentErrorTag {
-    #[serde(rename = "FileMutationStaleContentError")]
-    StaleContent,
-}
+impl FileMutationError {
+    /// The tag as it appears on the wire, namespace included.
+    ///
+    /// Exposed because the tag is the part callers match on, and a caller that
+    /// has to re-spell `"FileMutation.StaleContentError"` in order to compare
+    /// against it is a caller that can get it wrong.
+    pub fn tag(&self) -> &'static str {
+        match self {
+            FileMutationError::StaleContent { .. } => "FileMutation.StaleContentError",
+            FileMutationError::TargetExists { .. } => "FileMutation.TargetExistsError",
+        }
+    }
 
-/// `TargetExistsError`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "_tag")]
-pub struct TargetExistsError {
-    #[serde(rename = "FileMutationTargetExistsError")]
-    pub tag: TargetExistsErrorTag,
-    pub path: String,
-}
-
-/// The tag.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum TargetExistsErrorTag {
-    #[serde(rename = "FileMutationTargetExistsError")]
-    TargetExists,
+    /// The path the error is about.
+    pub fn path(&self) -> &str {
+        match self {
+            FileMutationError::StaleContent { path } => path,
+            FileMutationError::TargetExists { path } => path,
+        }
+    }
 }
 
 /// `WriteResult.operation`.
@@ -335,23 +353,37 @@ mod tests {
 
     #[test]
     fn the_errors_serialise_under_their_tags() {
-        let e = StaleContentError { tag: StaleContentErrorTag::StaleContent, path: "/a".into() };
+        // The tag is namespaced in the TypeScript - `FileMutation.StaleContentError`,
+        // with a dot - and the fields sit BESIDE it on the same object, not under
+        // it. Both halves are asserted, because a tag alone would pass even if
+        // the fields were nested one level too deep.
+        let e = FileMutationError::StaleContent { path: "/a".into() };
         assert_eq!(
-            serde_json::to_value(&e).unwrap()["_tag"],
-            serde_json::json!("FileMutation.StaleContentError")
+            serde_json::to_value(&e).unwrap(),
+            serde_json::json!({ "_tag": "FileMutation.StaleContentError", "path": "/a" })
         );
-        let e = TargetExistsError { tag: TargetExistsErrorTag::TargetExists, path: "/a".into() };
+        let e = FileMutationError::TargetExists { path: "/b".into() };
         assert_eq!(
-            serde_json::to_value(&e).unwrap()["_tag"],
-            serde_json::json!("FileMutation.TargetExistsError")
+            serde_json::to_value(&e).unwrap(),
+            serde_json::json!({ "_tag": "FileMutation.TargetExistsError", "path": "/b" })
         );
     }
 
     #[test]
-    fn an_error_round_trips() {
-        let e = StaleContentError { tag: StaleContentErrorTag::StaleContent, path: "/a".into() };
-        let back: StaleContentError = serde_json::from_value(serde_json::to_value(&e).unwrap()).unwrap();
-        assert_eq!(back, e);
+    fn an_error_round_trips_through_its_tag() {
+        // The direction that matters: a caller reading our output has to get the
+        // same variant back. A shape that only serialises correctly would pass the
+        // test above and still break every consumer.
+        for e in [
+            FileMutationError::StaleContent { path: "/a".into() },
+            FileMutationError::TargetExists { path: "/b".into() },
+        ] {
+            let text = serde_json::to_string(&e).unwrap();
+            let back: FileMutationError = serde_json::from_str(&text).unwrap();
+            assert_eq!(back, e, "round trip of {}", text);
+            assert_eq!(back.tag(), e.tag());
+            assert_eq!(back.path(), e.path());
+        }
     }
 
     #[test]
