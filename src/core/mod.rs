@@ -21,6 +21,7 @@
 
 
 
+
 pub mod command;
 pub mod config_agent;
 pub mod config_mcp;
@@ -55,6 +56,7 @@ pub mod session_v1;
 pub mod skill_discovery;
 pub mod skill_guidance;
 pub mod snapshot;
+pub mod state;
 pub mod system_context;
 pub mod system_context_builtins;
 pub mod system_context_registry;
