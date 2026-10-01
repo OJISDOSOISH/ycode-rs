@@ -1,0 +1,177 @@
+{
+  "total_count": 1,
+  "jobs": [
+    {
+      "id": 110385982480,
+      "run_id": 36867328617,
+      "workflow_name": "build",
+      "head_branch": "main",
+      "run_url": "https://api.github.com/repos/OJISDOSOISH/ycode-rs/actions/runs/36867328617",
+      "run_attempt": 1,
+      "node_id": "CR_kwDOUzBXg88AAAAZs4RsEA",
+      "head_sha": "24c3143f65a39fdde9db40b03411e3adf13ea7d1",
+      "url": "https://api.github.com/repos/OJISDOSOISH/ycode-rs/actions/jobs/110385982480",
+      "html_url": "https://github.com/OJISDOSOISH/ycode-rs/actions/runs/36867328617/job/110385982480",
+      "status": "completed",
+      "conclusion": "failure",
+      "created_at": "2026-10-01T13:15:11Z",
+      "started_at": "2026-10-01T13:15:17Z",
+      "completed_at": "2026-10-01T13:16:08Z",
+      "name": "build (windows-latest)",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1,
+          "started_at": "2026-10-01T13:15:17Z",
+          "completed_at": "2026-10-01T13:15:19Z"
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2,
+          "started_at": "2026-10-01T13:15:19Z",
+          "completed_at": "2026-10-01T13:15:28Z"
+        },
+        {
+          "name": "Installer Rust",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3,
+          "started_at": "2026-10-01T13:15:28Z",
+          "completed_at": "2026-10-01T13:15:57Z"
+        },
+        {
+          "name": "Cacher les dependances cargo",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4,
+          "started_at": "2026-10-01T13:15:57Z",
+          "completed_at": "2026-10-01T13:15:59Z"
+        },
+        {
+          "name": "Verifier le format",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 5,
+          "started_at": "2026-10-01T13:15:59Z",
+          "completed_at": "2026-10-01T13:16:02Z"
+        },
+        {
+          "name": "Compiler les tests",
+          "status": "completed",
+          "conclusion": "failure",
+          "number": 6,
+          "started_at": "2026-10-01T13:16:02Z",
+          "completed_at": "2026-10-01T13:16:03Z"
+        },
+        {
+          "name": "Test coordinator simple",
+          "status": "completed",
+          "conclusion": "failure",
+          "number": 7,
+          "started_at": "2026-10-01T13:16:03Z",
+          "completed_at": "2026-10-01T13:16:03Z"
+        },
+        {
+          "name": "Test coordinator wake coalesce",
+          "status": "completed",
+          "conclusion": "failure",
+          "number": 8,
+          "started_at": "2026-10-01T13:16:03Z",
+          "completed_at": "2026-10-01T13:16:03Z"
+        },
+        {
+          "name": "Test coordinator wake pendant execution",
+          "status": "completed",
+          "conclusion": "failure",
+          "number": 9,
+          "started_at": "2026-10-01T13:16:03Z",
+          "completed_at": "2026-10-01T13:16:04Z"
+        },
+        {
+          "name": "Test coordinator cles differentes",
+          "status": "completed",
+          "conclusion": "failure",
+          "number": 10,
+          "started_at": "2026-10-01T13:16:04Z",
+          "completed_at": "2026-10-01T13:16:04Z"
+        },
+        {
+          "name": "Lancer les autres tests",
+          "status": "completed",
+          "conclusion": "failure",
+          "number": 11,
+          "started_at": "2026-10-01T13:16:04Z",
+          "completed_at": "2026-10-01T13:16:04Z"
+        },
+        {
+          "name": "Compiler la version optimisee",
+          "status": "completed",
+          "conclusion": "skipped",
+          "number": 12,
+          "started_at": "2026-10-01T13:16:04Z",
+          "completed_at": "2026-10-01T13:16:04Z"
+        },
+        {
+          "name": "Publier l'artefact",
+          "status": "completed",
+          "conclusion": "skipped",
+          "number": 13,
+          "started_at": "2026-10-01T13:16:04Z",
+          "completed_at": "2026-10-01T13:16:04Z"
+        },
+        {
+          "name": "Publier erreurs compilation",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 14,
+          "started_at": "2026-10-01T13:16:04Z",
+          "completed_at": "2026-10-01T13:16:05Z"
+        },
+        {
+          "name": "Publier echecs tests",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 15,
+          "started_at": "2026-10-01T13:16:05Z",
+          "completed_at": "2026-10-01T13:16:05Z"
+        },
+        {
+          "name": "Post Cacher les dependances cargo",
+          "status": "completed",
+          "conclusion": "skipped",
+          "number": 29,
+          "started_at": "2026-10-01T13:16:05Z",
+          "completed_at": "2026-10-01T13:16:05Z"
+        },
+        {
+          "name": "Post Run actions/checkout@v4",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 30,
+          "started_at": "2026-10-01T13:16:05Z",
+          "completed_at": "2026-10-01T13:16:07Z"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 31,
+          "started_at": "2026-10-01T13:16:07Z",
+          "completed_at": "2026-10-01T13:16:07Z"
+        }
+      ],
+      "check_run_url": "https://api.github.com/repos/OJISDOSOISH/ycode-rs/check-runs/110385982480",
+      "labels": [
+        "windows-latest"
+      ],
+      "runner_id": 1000000154,
+      "runner_name": "GitHub Actions 1000000154",
+      "runner_group_id": 0,
+      "runner_group_name": "GitHub Actions"
+    }
+  ]
+}

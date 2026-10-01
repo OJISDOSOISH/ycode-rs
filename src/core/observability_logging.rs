@@ -18,8 +18,6 @@
 //! No camelCase fields occur in the pure surface; env keys
 //! (`OPENCODE_LOG_LEVEL`) are matched verbatim.
 
-use std::collections::BTreeMap;
-
 /// Environment variable read by the source.
 pub const LOG_LEVEL_ENV: &str = "OPENCODE_LOG_LEVEL";
 
@@ -113,6 +111,7 @@ pub fn render_pair(key: &str, value: &serde_json::Value) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::collections::BTreeMap;
 
     #[test]
     fn level_parsing_defaults_to_info() {

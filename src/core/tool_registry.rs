@@ -241,7 +241,8 @@ mod tests {
     fn a_disabled_tool_is_dropped_from_the_advertised_set() {
         let mut registry = Registry::new();
         registry.register(&[("read".into(), reg(1, "read")), ("write".into(), reg(2, "write"))]);
-        let listed = registry.materialize(&[rule("write", "*", RuleEffect::Deny)]);
+        let rules: Ruleset = vec![rule("write", "*", RuleEffect::Deny)];
+        let listed = registry.materialize(&rules);
         assert_eq!(listed.names(), vec!["read"]);
     }
 
@@ -249,7 +250,8 @@ mod tests {
     fn materialize_keeps_every_tool_when_nothing_is_disabled() {
         let mut registry = Registry::new();
         registry.register(&[("read".into(), reg(1, "read")), ("write".into(), reg(2, "write"))]);
-        assert_eq!(registry.materialize(&[]).names(), vec!["read", "write"]);
+        let rules: Ruleset = vec![];
+        assert_eq!(registry.materialize(&rules).names(), vec!["read", "write"]);
     }
 
     #[test]
@@ -280,12 +282,13 @@ mod tests {
     fn the_advertised_path_reads_from_the_frozen_set() {
         let mut registry = Registry::new();
         registry.register(&[("read".into(), reg(1, "read"))]);
-        let frozen = registry.materialize(&[]);
+        let empty: Ruleset = vec![];
+        let frozen = registry.materialize(&empty);
         // Registered again after the definitions went out.
         registry.register(&[("read".into(), reg(2, "read"))]);
         assert_eq!(frozen.settle_error("read", Some(1)), None, "the snapshot still holds identity 1");
         assert_eq!(
-            registry.materialize(&[]).settle_error("read", Some(1)),
+            registry.materialize(&empty).settle_error("read", Some(1)),
             Some(stale_tool_call("read")),
             "the fresh snapshot holds identity 2"
         );
@@ -295,8 +298,10 @@ mod tests {
     fn a_tool_disabled_after_the_definitions_reads_as_unknown() {
         let mut registry = Registry::new();
         registry.register(&[("read".into(), reg(1, "read"))]);
-        let frozen = registry.materialize(&[]);
-        let disabled = registry.materialize(&[rule("read", "*", RuleEffect::Deny)]);
+        let empty: Ruleset = vec![];
+        let frozen = registry.materialize(&empty);
+        let rules: Ruleset = vec![rule("read", "*", RuleEffect::Deny)];
+        let disabled = registry.materialize(&rules);
         assert!(frozen.settle_error("read", Some(1)).is_none());
         assert_eq!(
             disabled.settle_error("read", Some(1)),
@@ -308,7 +313,8 @@ mod tests {
     #[test]
     fn a_name_never_registered_is_unknown_on_both_paths() {
         let registry = Registry::new();
-        let frozen = registry.materialize(&[]);
+        let empty: Ruleset = vec![];
+        let frozen = registry.materialize(&empty);
         assert_eq!(frozen.settle_error("read", Some(1)), Some(unknown_tool("read")));
         assert_eq!(registry.check_settlement("read", Some(1)), Some(unknown_tool("read")));
     }
