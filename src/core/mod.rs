@@ -7,6 +7,7 @@
 
 
 
+
 pub mod command;
 pub mod config_agent;
 pub mod config_mcp;
@@ -44,5 +45,7 @@ pub mod system_context_builtins;
 pub mod system_context_registry;
 pub mod tool_read;
 pub mod tool_read_filesystem;
+pub mod tool_todowrite;
+pub mod tool_write;
 pub mod util_error;
 pub mod websearch;
