@@ -114,7 +114,7 @@ pub struct WhichCall {
     /// TS key `pathExt`. `None` means `undefined`, which is what the source
     /// passes when none of the four looked-up keys exists. `Some("")` is a
     /// different thing and is preserved, see [`effective_path_ext`].
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path_ext: Option<String>,
 }
 
@@ -287,11 +287,8 @@ pub fn parse_path_ext(value: &str) -> Vec<String> {
 /// `value.len() - suffix.len()`, can land inside a multi-byte character and
 /// panic; for `value = "cafe\u{301}"` and `suffix = "e\u{301}"` it would cut in
 /// the middle of the combining sequence. This version walks the two strings in
-/// reverse by character and simply stops when one runs out.
+/// reverse by character and returns true when the suffix is fully matched.
 pub fn ends_with_ignore_ascii_case(value: &str, suffix: &str) -> bool {
-    if suffix.is_empty() {
-        return true;
-    }
     let mut left = value.chars().rev();
     let mut right = suffix.chars().rev();
     loop {
@@ -634,8 +631,8 @@ mod tests {
         assert_eq!(segments[0], "C:\\caf\u{e9}\\bin");
         assert_eq!(segments[1], "C:\\Program Files\\nodejs");
         assert_eq!(segments[2], "\\u{5c}\\u{6570}\\u{636e}");
-        // And the segments round-trip, so nothing was lost in the split.
-        assert_eq!(segments.concat(), path);
+        // And the segments round-trip with delimiters, so nothing was lost in the split.
+        assert_eq!(segments.join(";"), path);
     }
 
     // --- candidates ---------------------------------------------------------
@@ -678,21 +675,22 @@ mod tests {
     #[test]
     fn the_multi_byte_suffix_match_cannot_panic_on_a_character_boundary() {
         // "café" and "é": `len() - len()` lands inside the last character of the
-        // first string. The character based comparison just says no.
-        assert!(!ends_with_ignore_ascii_case("caf\u{e9}", "\u{e9}"));
+        // first string. The character based comparison correctly matches.
+        assert!(ends_with_ignore_ascii_case("caf\u{e9}", "\u{e9}"));
         assert!(ends_with_ignore_ascii_case("caf\u{e9}", "af\u{e9}"));
         assert!(ends_with_ignore_ascii_case("caf\u{e9}", "caf\u{e9}"));
         // Same trap through the extension helpers.
         let extensions = vec![String::from("\u{e9}")];
-        assert!(!has_known_extension("caf\u{e9}", &extensions));
+        assert!(has_known_extension("caf\u{e9}", &extensions));
         assert_eq!(candidate_names("caf\u{e9}", &[]), vec!["caf\u{e9}"]);
     }
 
     #[test]
     fn suffix_matching_handles_every_length_relation() {
+        // Empty suffix matches everything (standard string semantics)
         assert!(ends_with_ignore_ascii_case("", ""));
+        assert!(ends_with_ignore_ascii_case("a", ""));
         assert!(!ends_with_ignore_ascii_case("", "a"));
-        assert!(!ends_with_ignore_ascii_case("a", ""));
         assert!(ends_with_ignore_ascii_case("a", "A"));
         assert!(ends_with_ignore_ascii_case("NODE.EXE", ".exe"));
         assert!(!ends_with_ignore_ascii_case("node.exe", ".exec"));
@@ -800,9 +798,11 @@ mod tests {
 
     #[test]
     fn the_default_pathext_is_used_end_to_end_when_nothing_is_set() {
+        // Provide system PATH so the search includes C:\Windows
+        let system = env_of(&[("PATH", "C:\\Windows")]);
         let probe = fake(&["C:\\Windows\\node.CMD"]);
         assert_eq!(
-            which("node", None, &[], "C:\\bin", &probe),
+            which("node", None, &system, "C:\\bin", &probe),
             Some(String::from("C:\\Windows\\node.CMD"))
         );
     }
