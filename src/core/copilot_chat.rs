@@ -184,8 +184,14 @@ pub struct ArgsRequeteChat {
     pub reasoning_effort: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub verbosity: Option<String>,
+    /// `compatibleOptions.thinking_budget` copie tel quel par `getArgs`.
+    ///
+    /// Le TS le type en `z.number()` dans `openaiCompatibleProviderOptions`,
+    /// donc un NOMBRE sur le fil : `Option<String>` mettrait `"2048"` entre
+    /// guillemets dans le corps de la requete. Type aligne sur la structure
+    /// d options portee dans `github_copilot_chat_openai_compatible_chat_options.rs`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub thinking_budget: Option<String>,
+    pub thinking_budget: Option<f64>,
     #[serde(default)]
     pub messages: Vec<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -769,6 +775,51 @@ mod tests {
         assert_eq!(nom_options_fournisseur("  copilot . x"), "copilot");
         assert_eq!(nom_options_fournisseur("copilot"), "copilot");
         assert_eq!(nom_options_fournisseur(""), "");
+    }
+
+    #[test]
+    fn le_corps_de_requete_tient_les_seize_cles_du_ts() {
+        // Les cles de `args` dans getArgs (openai-compatible-chat-language-model.ts),
+        // nom pour nom. Une cle snake_case perdue en camelCase, ou l inverse,
+        // passerait inapercue jusqu a l'appel de l'API.
+        let args = ArgsRequeteChat {
+            model: "m".to_string(),
+            user: Some("u".to_string()),
+            max_tokens: Some(16),
+            temperature: Some(0.5),
+            top_p: Some(0.9),
+            frequency_penalty: Some(0.1),
+            presence_penalty: Some(0.2),
+            response_format: Some(FormatReponseDemande::JsonSchema {
+                json_schema: SchemaJsonDemande {
+                    schema: json!({ "type": "object" }),
+                    name: "response".to_string(),
+                    description: None,
+                },
+            }),
+            stop: Some(vec!["x".to_string()]),
+            seed: Some(7),
+            reasoning_effort: Some("high".to_string()),
+            verbosity: Some("low".to_string()),
+            thinking_budget: Some(2048.0),
+            messages: vec![],
+            tools: None,
+            tool_choice: None,
+            extras: BTreeMap::new(),
+        };
+        let corps = serde_json::to_value(&args).unwrap();
+        for cle in [
+            "model", "user", "max_tokens", "temperature", "top_p", "frequency_penalty",
+            "presence_penalty", "response_format", "stop", "seed", "reasoning_effort", "verbosity",
+            "thinking_budget", "messages", "tools", "tool_choice",
+        ] {
+            assert!(corps.get(cle).is_some(), "cle absente du corps : {}", cle);
+        }
+        // `thinking_budget` est un nombre cote TS (`z.number()`), pas une
+        // chaine : c est le piege que ce test verrouille.
+        assert!(corps["thinking_budget"].is_number());
+        assert!(corps["response_format"]["json_schema"]["schema"].is_object());
+        assert_eq!(corps["response_format"]["type"], json!("json_schema"));
     }
 
     #[test]
