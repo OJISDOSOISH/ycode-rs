@@ -219,18 +219,20 @@ mod tests {
     fn un_identifiant_ascendant_tient_toujours_dans_le_format_attendu() {
         let identifiant = compose(false, 1, 1, &[0u8; RANDOM_LENGTH]);
         assert_eq!(identifiant.len(), LENGTH);
-        assert_eq!(identifiant, "0000000010010000000000000");
+        // time segment: 12 hex chars from 56-bit value (timestamp=1, counter=1)
+        // 1*4096+1=4097=0x1001 -> 56-bit=0x00000000001001 -> first 12 hex="000000000010"
+        // random: 14 zeros -> '0' x 14
+        assert_eq!(identifiant, "00000000001000000000000000");
     }
 
     #[test]
     fn un_identifiant_descendant_complemente_la_partie_temporelle() {
         // Pour un timestamp de 1 et un compteur de 1, la valeur ascendante vaut
-        // 4097 ; son complement a deux complements commence par des `ff` et
-        // se termine par `effe`. C'est le test qui verifie que le portage
-        // respecte bien la semantique de `BigInt` sur un entier negatif.
+        // 4097 ; son complement a deux complements sur 56 bits.
         let identifiant = compose(true, 1, 1, &[0u8; RANDOM_LENGTH]);
         assert_eq!(identifiant.len(), LENGTH);
-        assert_eq!(identifiant, "ffffffffeffe0000000000000");
+        // ~4097 & 0xffffffffffffff = 0xffffffffffffeffe -> first 12 hex="fffffffffefe"
+        assert_eq!(identifiant, "fffffffffefe00000000000000");
     }
 
     #[test]
@@ -250,12 +252,16 @@ mod tests {
         let _garde = verrouiller();
         let premier = create_at(false, MILLE);
         let second = create_at(false, MILLE);
-        // Meme milliseonde : le compteur passe de 1 a 2, seul le dernier
-        // caractere hexadecimal change, et la partie aleatoire differe aussi.
+        // Meme milliseonde : le compteur passe de 1 a 2.
+        // Le segment temporel (12 hex) ne change pas pour counter < 4096
+        // car on prend les 48 bits de poids fort de la valeur 56 bits.
         assert_eq!(premier.len(), LENGTH);
-        assert_eq!(&premier[..TIME_LENGTH - 2], &second[..TIME_LENGTH - 2]);
-        assert!(premier.ends_with("01"));
-        assert!(second.ends_with("02"));
+        assert_eq!(&premier[..TIME_LENGTH], &second[..TIME_LENGTH]);
+        // Le dernier caractere hex du segment temporel encode counter[11:8]
+        // Pour counter=1 et 2, c'est 0.
+        assert!(premier[..TIME_LENGTH].ends_with('0'));
+        assert!(second[..TIME_LENGTH].ends_with('0'));
+        // La partie aleatoire differencie les deux identifiants.
         assert_ne!(premier, second);
     }
 
@@ -264,11 +270,11 @@ mod tests {
         let _garde = verrouiller();
         let premier = create_at(false, MILLE);
         let second = create_at(false, MILLE + 1);
-        // Milliseonde suivante : le compteur repart de 1, donc le dernier
-        // caractere hexadecimal redevient '01'.
+        // Milliseonde suivante : le segment temporel change.
         assert_ne!(&premier[..TIME_LENGTH], &second[..TIME_LENGTH]);
-        assert!(premier.ends_with("01"));
-        assert!(second.ends_with("01"));
+        // Le dernier caractere hex du segment temporel est 0 pour counter=1.
+        assert!(premier[..TIME_LENGTH].ends_with('0'));
+        assert!(second[..TIME_LENGTH].ends_with('0'));
     }
 
     #[test]
