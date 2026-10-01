@@ -1026,9 +1026,12 @@ mod tests {
         let objet = serde_json::to_value(&erreur).unwrap();
         assert_eq!(objet["dir"], json!("/cache/packages/@ai-sdk/casse"));
         assert_eq!(objet["add"], json!(["@ai-sdk/casse"]));
-        assert!(objet.get("cause").is_none(), "cause est un Defect, pas une donnee JSON");
         assert!(objet.get("tag").is_none(), "le tag n'est pas un champ serialise");
         assert!(objet.get("_tag").is_none(), "le tag ne sort pas non sous le nom interne");
+        // Le Defect est reduit a sa representation textuelle : decision de
+        // portage documentee sur le champ, la seule forme qui franchit un
+        // appel entre deux langages.
+        assert_eq!(objet["cause"], json!("EACCES: permission denied"));
 
         // Sans `add` ni `cause`, les cles optionnelles disparaitent au lieu de
         // valoir `null`.
@@ -1065,7 +1068,7 @@ mod tests {
     }
 
     #[test]
-    fn seul_un_prefixe_exact_de_create_qualifie_un_export() {
+    fn le_prefixe_create_qualifie_quelle_que_soit_la_suite() {
         fn qualifie(noms: &[String]) -> Option<&str> {
             premier_export(noms)
         }
@@ -1074,7 +1077,10 @@ mod tests {
         assert_eq!(qualifie(&["default".to_string(), "createX".to_string()]), Some("createX"));
         // Ces cinq echouent : le prefixe est sensible a la casse, un prefixe
         // partiel ne suffit pas, et la chaine vide ne commence par rien.
-        assert_eq!(qualifie(&["created".to_string()]), None);
+        // `created` qualifie au contraire — la source ne teste que le prefixe
+        // (`startsWith("create")` dans plugin/provider/dynamic.ts:24), la suite
+        // du nom lui est indifferente.
+        assert_eq!(qualifie(&["created".to_string()]), Some("created"));
         assert_eq!(qualifie(&["Create".to_string()]), None);
         assert_eq!(qualifie(&["creat".to_string()]), None);
         assert_eq!(qualifie(&["default".to_string(), "other".to_string()]), None);
@@ -1205,8 +1211,8 @@ mod tests {
         assert!(!url.starts_with("file:////"), "pas de barre superflue : {url}");
         assert_eq!(
             url.chars().filter(|c| *c == '/').count(),
-            3,
-            "deux barres du schema plus une du chemin : {url}"
+            4,
+            "deux barres du schema, la barre initiale du chemin absolu, et la barre entre segments : {url}"
         );
         // Idem pour la lettre de lecteur, qui n'a pas de barre initiale.
         let windows = chemin_vers_url_fichier("C:\\cache\\x.js");
