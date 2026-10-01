@@ -222,7 +222,7 @@ fn sha256_digest(entree: &[u8]) -> [u8; 32] {
 
 #[cfg(test)]
 mod tests {
-    use super::{fast, sha256};
+    use super::{completer, fast, sha1_digest, sha256, vers_hex};
 
     /// TEMPORARY DIAGNOSTIC -- a supprimer apres identification.
     ///

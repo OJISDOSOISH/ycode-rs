@@ -270,9 +270,16 @@ mod tests {
 
     #[test]
     fn empty_components_are_not_filtered() {
-        // `split` filters nothing in JavaScript. That is what makes
-        // `getDirectory("a//b")` return `a//b/` rather than `a/b/`.
-        assert_eq!(directory(Some("a//b")), "a//b/");
+        // `split` filters nothing in JavaScript, and the consequence is visible
+        // in the result. "a//b" has no trailing separator, so the trim is a
+        // no-op; parts are ["a", "", "b"]. `slice(0, 2)` KEEPS the empty
+        // component, giving ["a", ""]; `join("/")` is then "a/", and the
+        // trailing "/" the source appends makes it "a//".
+        //
+        // The file name is therefore NOT preserved, which is the counter-
+        // intuitive part: an empty component does not survive as an empty path
+        // piece, it shifts everything left and drops the last real element.
+        assert_eq!(directory(Some("a//b")), "a//");
         assert_eq!(directory(Some("dir/file.txt")), "dir/");
     }
 
@@ -318,9 +325,15 @@ mod tests {
     fn truncation_keeps_the_extension_and_adds_one_punctuation_mark() {
         let long = "a_very_long_file_name.txt";
         let r = truncated_file_name(Some(long), 20);
+        // The ellipsis goes BEFORE the extension, not at the end: the source is
+        // `filename.slice(0, available) + "…" + ext`. With ext = ".txt" (4),
+        // available = 20 - 4 - 1 = 15, so the result keeps 15 characters, then
+        // the mark, then the extension: 15 + 1 + 4 = 20 exactly.
+        assert_eq!(r, "a_very_long_fil\u{2026}.txt");
         assert!(r.ends_with(".txt"), "the extension must survive: {r}");
-        assert!(r.ends_with('\u{2026}'), "truncation mark: {r}");
-        assert!(r.chars().count() <= 20, "too long: {r}");
+        assert_eq!(r.chars().count(), 20, "the budget must be exact: {r}");
+        // The mark sits at the junction, not at the end.
+        assert!(!r.ends_with('\u{2026}'), "the mark precedes the extension: {r}");
     }
 
     #[test]
