@@ -63,26 +63,33 @@ jobs:
       # masquait tout signal. Les doctests auront leur propre job plus tard.
       - name: Test coordinator simple
         if: always()
+        # Plafond par etape : une pendaison doit couter des minutes, pas les
+        # 6 h du plafond global. Run 50 a consumed 6 h sur ce seul test.
+        timeout-minutes: 10
         shell: bash
         run: cargo test --target ${{ matrix.target }} --lib --bins --tests -- --exact core::session::run_coordinator::tests::execution_simple_sans_concurrence 2>&1 | tee -a tests.log; test ${PIPESTATUS[0]} -eq 0
 
       - name: Test coordinator wake coalesce
         if: always()
+        timeout-minutes: 10
         shell: bash
         run: cargo test --target ${{ matrix.target }} --lib --bins --tests -- --exact core::session::run_coordinator::tests::wake_coalesce_plusieurs_wakes_en_un_seul_successeur 2>&1 | tee -a tests.log; test ${PIPESTATUS[0]} -eq 0
 
       - name: Test coordinator wake pendant execution
         if: always()
+        timeout-minutes: 10
         shell: bash
         run: cargo test --target ${{ matrix.target }} --lib --bins --tests -- --exact core::session::run_coordinator::tests::wake_pendant_execution_planifie_un_successeur 2>&1 | tee -a tests.log; test ${PIPESTATUS[0]} -eq 0
 
       - name: Test coordinator cles differentes
         if: always()
+        timeout-minutes: 10
         shell: bash
         run: cargo test --target ${{ matrix.target }} --lib --bins --tests -- --exact core::session::run_coordinator::tests::cles_differentes_s_executent_concurremment 2>&1 | tee -a tests.log; test ${PIPESTATUS[0]} -eq 0
 
       - name: Lancer les autres tests
         if: always()
+        timeout-minutes: 120
         shell: bash
         run: cargo test --target ${{ matrix.target }} --lib --bins --tests -- --skip core::session::run_coordinator 2>&1 | tee -a tests.log; test ${PIPESTATUS[0]} -eq 0
 
