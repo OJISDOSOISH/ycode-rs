@@ -133,24 +133,33 @@ pub fn create_at(descending_order: bool, timestamp: i64) -> String {
 /// - `descending_order` correspond a l'inversion par `~` ;
 /// - `random` est la liste des octets aleatoires, convertis en caracteres.
 fn compose(descending_order: bool, timestamp: i64, counter: i64, random: &[u8]) -> String {
-    let current = (timestamp as i128) * BASE + counter as i128;
-    // The source treats the 56-bit value as unsigned for hex formatting.
-    // For ascending: current (positive). For descending: ~current (two's complement).
-    // Mask to 56 bits to match TypeScript's BigInt behavior where only the low
-    // 56 bits are used for the time segment (12 hex chars = 48 bits, but the
-    // full value is 56 bits to cover the ~2.2 year window).
-    const MASK_56: i128 = (1i128 << 56) - 1;
-    let value_u56 = if descending_order {
-        (!current) & MASK_56
+    // The source divides by 4096 FIRST, then formats as 12 hex chars (36 bits).
+    // This is the millisecond timestamp (timestamp + counter/4096, floor).
+    let time_value = if descending_order {
+        // For descending, the source uses ~current then divides by 4096.
+        // current = timestamp * 4096 + counter
+        // ~current = -current - 1 (two's complement)
+        // We need the low 36 bits of the complemented value.
+        // The source uses BigInt which is arbitrary precision, so ~current
+        // gives an infinite sequence of 1s in two's complement.
+        // Taking the low 36 bits after division by 4096:
+        // ~current / 4096 = ~(timestamp + counter/4096) = -timestamp - 1 (since counter < 4096)
+        // Then take low 36 bits.
+        let current = (timestamp as i64) * 4096 + counter;
+        let complemented = !current;
+        // Get low 36 bits of (complemented / 4096)
+        ((complemented / 4096) & 0xFFFFFFFFF) as i64
     } else {
-        current & MASK_56
+        // Ascending: (timestamp * 4096 + counter) / 4096 = timestamp + counter/4096
+        // Since counter < 4096, this equals timestamp.
+        timestamp
     };
-    // Format as 14 hex chars (56 bits), take the high 48 bits (first 12 chars).
-    let hex = format!("{:014x}", value_u56);
-    let time_hex = &hex[..12];
+    
+    // Format as 12 hex chars (36 bits), zero-padded
+    let time_hex = format!("{:012x}", time_value & 0xFFFFFFFFF);
 
     let mut out = String::with_capacity(TIME_LENGTH + random.len());
-    out.push_str(time_hex);
+    out.push_str(&time_hex);
     for &octet in random {
         out.push(CHARS[(octet % 62) as usize] as char);
     }

@@ -558,7 +558,7 @@ mod tests {
 
     #[test]
     fn an_ascending_id_leaves_the_counter_to_the_low_twelve_bits_only() {
-        // 1_757_000_000_000 * 4096 = 0x9155c620_0000 in 48 bits. The counter is
+        // 1_757_000_000 * 4096 = 0x68b9b1400000 in 48 bits. The counter is
         // added before masking, so it can only move the last three hex digits
         // and the first nine are fixed. This assertion therefore holds no
         // matter what the process-wide counter happens to be, which is what
@@ -566,7 +566,7 @@ mod tests {
         let id = create("ses", Direction::Ascending, Some(TS));
         let segment = time_segment(&id);
         assert!(
-            segment.starts_with("9155c6200"),
+            segment.starts_with("68b9b1400"),
             "the high 36 bits moved: {segment:?}"
         );
     }
@@ -612,7 +612,9 @@ mod tests {
         let descending_id = create("ses", Direction::Descending, Some(1));
         let up = time_segment(&ascending_id);
         let down = time_segment(&descending_id);
-        assert!(up.starts_with("000000001"), "{up:?}");
+        // timestamp=1, counter=1 -> current=4097=0x1001 -> 14 hex="00000000001001" -> first 12="000000000010"
+        assert!(up.starts_with("000000000"), "{up:?}");
+        // descending: ~4097 & 0xFFFFFFFFFFFFFF = 0xFFFFFFFFFFFFEFFE -> first 12="ffffffffeffe"
         assert!(down.starts_with("ffffffff"), "{down:?}");
         assert_ne!(up, down);
     }
