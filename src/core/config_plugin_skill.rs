@@ -79,7 +79,7 @@ pub enum Entry {
 
 /// `URL.canParse` plus `/^(https?:)$/` on the protocol: only http and https.
 pub fn is_http_url(item: &str) -> bool {
-    for prefix in ("https://", "http://") {
+    for prefix in ["https://", "http://"] {
         if let Some(rest) = item.strip_prefix(prefix) {
             return !rest.is_empty();
         }

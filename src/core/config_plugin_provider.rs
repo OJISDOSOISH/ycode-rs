@@ -81,7 +81,7 @@ pub fn merge_capabilities(
         (None, Some(p)) => Some(p.clone()),
         (Some(b), None) => Some(b.clone()),
         (Some(b), Some(p)) => Some(Capabilities {
-            tools: p.tools.unwrap_or(b.tools),
+            tools: p.tools.or(b.tools),
             input: p.input.clone().or_else(|| b.input.clone()),
             output: p.output.clone().or_else(|| b.output.clone()),
         }),
