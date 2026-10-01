@@ -250,7 +250,7 @@ pub fn extract_text_from_html(html: &str) -> String {
                 i += 1;
             }
             if skip_depth == 0 {
-                text.extend(bytes[start..i].iter().copied());
+                text.push_str(std::str::from_utf8(&bytes[start..i]).unwrap_or(""));
             }
             continue;
         }
@@ -272,7 +272,7 @@ pub fn extract_text_from_html(html: &str) -> String {
         if j >= bytes.len() {
             // No closing angle bracket: htmlparser2 would keep this as text.
             if skip_depth == 0 {
-                text.extend(bytes[i..].iter().copied());
+                text.push_str(std::str::from_utf8(&bytes[i..]).unwrap_or(""));
             }
             break;
         }
