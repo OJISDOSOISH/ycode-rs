@@ -3,8 +3,9 @@
 //! Le portage suit les dependances du TypeScript d'origine : les schemas
 //! d'abord, parce que tout le reste les manipule.
 
-pub mod run;
-pub mod session;
+
+
+
 
 pub mod command;
 pub mod config_agent;
@@ -24,17 +25,24 @@ pub mod global;
 pub mod image;
 pub mod integration;
 pub mod model;
+pub mod observability_logging;
+pub mod observability_otlp;
 pub mod open;
 pub mod permission_saved;
+pub mod process;
 pub mod provider;
 pub mod ripgrep;
+pub mod run;
+pub mod session;
 pub mod session_event;
 pub mod session_v1;
 pub mod skill_discovery;
 pub mod skill_guidance;
 pub mod snapshot;
-pub mod websearch;
-
-pub mod process;
-
+pub mod system_context;
+pub mod system_context_builtins;
+pub mod system_context_registry;
+pub mod tool_read;
+pub mod tool_read_filesystem;
 pub mod util_error;
+pub mod websearch;
