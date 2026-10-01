@@ -83,6 +83,35 @@ pub fn native_separator(platform: Platform) -> &'static str {
     }
 }
 
+/// Whether a path is ROOTED, which is a per-platform question.
+///
+/// Node answers it inside `path.win32.relative` and `path.posix.relative`, and
+/// the two disagree on a leading backslash: `path.win32` reads `\a` as the root
+/// of the current drive, while `path.posix` reads it as a relative path whose
+/// first segment happens to contain a backslash.
+///
+/// That disagreement is not cosmetic here, because `relative` only consults the
+/// root flags on one branch - the case where the two paths share no leading
+/// segment - and that branch returns `to` unchanged when neither side is
+/// rooted. So for `relative("\\base", "other")` the old test, which recognised
+/// a root only by a leading `/` or a `:`, saw two unrooted paths and returned
+/// `other`, i.e. "the path `other` is inside the root `\base`". On Windows it is
+/// not: it is a sibling. That is a permission decision, and it was being made
+/// by a parameter the function never read.
+fn has_root(path: &str, platform: Platform) -> bool {
+    if path.starts_with('/') {
+        return true;
+    }
+    match platform {
+        // A drive letter and colon, or a backslash-led root.
+        Platform::Windows => path.starts_with('\\') || path.get(1..2) == Some(":"),
+        // Nothing else roots a POSIX path, and a colon is an ordinary character
+        // in a segment name - which is why this is not the `contains(':')` the
+        // first draft used.
+        Platform::Posix => false,
+    }
+}
+
 /// `path.relative`, for the absolute paths this module is given.
 ///
 /// Same shape as `config_plugin_path::relative`, which is the other place the
@@ -94,8 +123,8 @@ pub fn relative(from: &str, to: &str, platform: Platform) -> String {
     }
     let from_parts = segments(from);
     let to_parts = segments(to);
-    let from_root = from.starts_with('/') || from.contains(':');
-    let to_root = to.starts_with('/') || to.contains(':');
+    let from_root = has_root(from, platform);
+    let to_root = has_root(to, platform);
     let mut shared = 0usize;
     while shared < from_parts.len() && shared < to_parts.len() && from_parts[shared] == to_parts[shared] {
         shared += 1;
@@ -141,7 +170,9 @@ pub fn contains(parent: &str, child: &str, platform: Platform) -> bool {
     if result == ".." {
         return false;
     }
-    !result.starts_with(&concat!("..", SEP))
+    // `concat!` already yields a `&'static str`, so the `&` made this `&&str`,
+    // which is not a `Pattern`. `starts_with` wanted the literal itself.
+    !result.starts_with(concat!("..", SEP))
 }
 
 /// `overlaps`: either path contains the other.
@@ -206,25 +237,73 @@ fn replace_prefixed_drive(input: &str, prefix: &str, build: impl Fn(char) -> Str
     format!("{}{}", build(drive), tail)
 }
 
-/// `normalizePathPattern`: a `dir/*` glob whose directory is normalised.
+/// `normalizePathPattern`: normalise a `dir/*` glob's directory.
 ///
-/// On a POSIX host `normalizePath` returns its argument, so this reduces to
-/// joining the directory with `*`. The drive-root case is in the TS and worth
-/// keeping: a pattern of `/c:*` has a directory of `/c:`, and joining that with
-/// a separator would produce `/c:/*`, which is a different path.
+/// Three things happen in the TypeScript, in this order, and the order is the
+/// whole function:
+///
+/// ```ts
+/// if (process.platform !== "win32") return p
+/// if (p === "*") return p
+/// const match = p.match(/^(.*)[\\/]\*$/)
+/// if (!match) return normalizePath(p)
+/// const dir = /^[A-Za-z]:$/.test(match[1]) ? match[1] + "\\" : match[1]
+/// return join(normalizePath(dir), "*")
+/// ```
+///
+/// The first draft of this port missed that the regex is ANCHORED at both ends.
+/// It searched for the last separator anywhere in the string, so `"C:/base/dir"`
+/// - which has a separator but does not end in `/*` - came back as
+/// `"C:\\base\\*"`: a glob for a completely different directory, built out of a
+/// path that was never a glob. Same for `"no-star"`, which has no separator at
+/// all and so fell through to the join branch and grew a star it was never
+/// given. Both mistakes are Windows-only, and this crate is built on
+/// `windows-latest`, so they were waiting to be found by a failing test rather
+/// than by a failing build.
+///
+/// A pattern that does not match does not get a star; it goes to
+/// `normalizePath`. That is why the step is a parameter here.
 pub fn normalize_path_pattern(p: &str, platform: Platform) -> String {
+    normalize_path_pattern_with(p, platform, |p| p.to_string())
+}
+
+/// `normalizePathPattern` with the `normalizePath` step supplied.
+///
+/// `normalizePath` is not pure in the TypeScript - it is
+/// `path.resolve(windowsPath(p))` followed by `realpathSync.native`, falling
+/// back to the resolved path when the file does not exist - so it touches the
+/// filesystem and cannot be written down here. Injecting it keeps this function
+/// testable and lets a caller that does have a filesystem pass a real one. The
+/// wrapper above substitutes the identity, which is exact on POSIX (where the
+/// real function returns its argument) and for any path that is already
+/// absolute and normalised.
+pub fn normalize_path_pattern_with<F>(p: &str, platform: Platform, normalize: F) -> String
+where
+    F: Fn(&str) -> String,
+{
     if !platform.is_windows() {
         return p.to_string();
     }
     if p == "*" {
         return p.to_string();
     }
-    let Some(slash) = p.rfind(['/', '\\']) else {
-        return join_star(p, platform);
-    };
-    let (dir, _) = p.split_at(slash);
-    let dir = if is_drive_root(dir) { format!("{}\\", dir) } else { dir.to_string() };
-    join_star(&dir, platform)
+    match trailing_glob_dir(p) {
+        Some(dir) => {
+            let dir = if is_drive_root(dir) { format!("{}\\", dir) } else { dir.to_string() };
+            join_star(&normalize(&dir), platform)
+        }
+        None => normalize(p),
+    }
+}
+
+/// `/^(.*)[\\/]\*$/`, keeping capture group 1.
+///
+/// `None` for anything that does not END with a separator and a star, which is
+/// the branch that sends the TypeScript to `normalizePath`. Note that `"C:*"`
+/// does not match either: the character before the star has to be a separator,
+/// and there it is a colon.
+fn trailing_glob_dir(p: &str) -> Option<&str> {
+    p.strip_suffix('*')?.strip_suffix(['/', '\\'])
 }
 
 /// `/^[A-Za-z]:$/`
@@ -233,11 +312,16 @@ fn is_drive_root(dir: &str) -> bool {
 }
 
 /// `join(normalizePath(dir), "*")`, with `normalizePath` elided on POSIX.
+///
+/// Joins with the separator of the platform it was HANDED, not the host's. An
+/// API that takes an explicit platform and then ignores it answers a different
+/// question than the one it was asked - and this one is how a permission glob is
+/// built, so the separator is part of the rule that gets stored.
 fn join_star(dir: &str, platform: Platform) -> String {
     if dir.is_empty() {
         return "*".to_string();
     }
-    format!("{}{}{}", dir.trim_end_matches(['/', '\\']), MAIN_SEPARATOR_STR, "*")
+    format!("{}{}{}", dir.trim_end_matches(['/', '\\']), native_separator(platform), "*")
 }
 
 /// The separator this host joins with, exposed for tests and callers.
@@ -252,6 +336,54 @@ mod tests {
 
     const W: Platform = Platform::Windows;
     const P: Platform = Platform::Posix;
+
+    // --- relative, and what "rooted" means per platform ---
+
+    #[test]
+    fn a_leading_backslash_is_a_root_on_windows_and_a_name_on_posix() {
+        // The whole reason `relative` takes a platform. `path.win32` reads `\a`
+        // as the root of the current drive; `path.posix` reads it as a relative
+        // path. When neither side is rooted, `relative` returns `to` unchanged -
+        // so the flag decides whether `other` is inside `\a` or beside it.
+        assert_eq!(relative("\\base", "other", W), "../other", "Windows roots the backslash path");
+        assert_eq!(relative("\\base", "other", P), "other", "POSIX treats it as a plain name");
+        assert_eq!(relative("other", "\\a", W), "../a");
+    }
+
+    #[test]
+    fn a_permission_root_with_a_leading_backslash_does_not_contain_a_sibling() {
+        // The consequence of the test above, stated as the permission decision
+        // it actually is. Before the platform was read, this returned true: the
+        // root flags said both paths were unrooted, so `relative` answered
+        // `other` and `contains` read that as containment.
+        assert!(!contains("\\base", "other", W), "a Windows root does not contain a bare sibling");
+        assert!(!contains("\\base", "sub/file", W));
+        assert!(!contains("C:/base", "other", W), "a drive root does not either");
+        // A rooted child is still contained, on either platform.
+        assert!(contains("\\base", "\\base/sub", W));
+        assert!(contains("/base", "/base/sub", P));
+    }
+
+    #[test]
+    fn a_colon_is_an_ordinary_character_in_a_posix_segment() {
+        // Why `has_root` does not look for a colon on POSIX: `weird:name` is a
+        // legal relative path there, and the first draft treated it as rooted.
+        assert_eq!(relative("a:b", "a:c", P), "c");
+        assert!(contains("/base", "weird:name", P));
+    }
+
+    #[test]
+    fn the_common_shapes_are_unaffected_by_the_root_change() {
+        // Everything the first draft got right, restated, so a future edit to
+        // `has_root` cannot quietly pass by breaking only the exotic cases.
+        assert_eq!(relative("/base", "/base/a", P), "a");
+        assert_eq!(relative("/base", "/other", P), "../other");
+        assert_eq!(relative("/base", "/base/../x", P), "../x");
+        assert_eq!(relative("C:/a", "C:/a/b", W), "b");
+        assert_eq!(relative("C:/a", "C:/b", W), "../b");
+        assert_eq!(relative("/base", "/base", P), "");
+        assert_eq!(relative("a/b", "c/d", P), "c/d");
+    }
 
     // --- windowsPath ---
 
@@ -386,10 +518,29 @@ mod tests {
 
     // --- normalizePathPattern ---
 
+    // The TypeScript, for reference, because every expectation below is a
+    // reading of these five lines rather than a guess about them:
+    //
+    //   if (process.platform !== "win32") return p
+    //   if (p === "*") return p
+    //   const match = p.match(/^(.*)[\\/]\*$/)
+    //   if (!match) return normalizePath(p)
+    //   const dir = /^[A-Za-z]:$/.test(match[1]) ? match[1] + "\\" : match[1]
+    //   return join(normalizePath(dir), "*")
+
     #[test]
-    fn a_posix_host_normalises_nothing() {
+    fn a_posix_platform_normalises_nothing() {
+        // The first branch returns the argument untouched - not "the directory
+        // with a star", which is what this port used to do.
         assert_eq!(normalize_path_pattern("C:/base/*", P), "C:/base/*");
         assert_eq!(normalize_path_pattern("*", P), "*");
+        assert_eq!(normalize_path_pattern("no-star", P), "no-star");
+        assert_eq!(normalize_path_pattern("", P), "");
+        assert_eq!(
+            normalize_path_pattern("C:/base/dir", P),
+            "C:/base/dir",
+            "a directory with a separator in it is still left alone on POSIX"
+        );
     }
 
     #[test]
@@ -398,29 +549,65 @@ mod tests {
     }
 
     #[test]
-    fn a_drive_root_directory_keeps_its_separator() {
-        // `/c:*` has the directory `/c:`; joining with a separator would make
-        // `/c:/*`, a different path.
-        let out = normalize_path_pattern("/c:*", W);
-        assert!(out.ends_with("*"));
-        assert!(!out.starts_with("/c:"), "got {}", out);
+    fn a_glob_keeps_its_directory_and_gains_a_windows_separator() {
+        // Exact assertions rather than `ends_with`, because the separator is
+        // part of the permission glob that gets stored and the answer must not
+        // depend on which host runs the test. Joining with the HOST separator
+        // made the POSIX expectation in the test above fail on `windows-latest`,
+        // which is where this crate is built.
+        //
+        // Note what is NOT here: the forward slashes in the directory survive.
+        // This function does not rewrite separators - that is `windowsPath`, and
+        // it runs inside the `normalizePath` step this port injects. The only
+        // separator it chooses itself is the one it joins before the star.
+        assert_eq!(normalize_path_pattern("C:/base/dir/*", W), "C:/base/dir\\*");
+        assert_eq!(normalize_path_pattern("C:/base/dir\\*", W), "C:/base/dir\\*");
+        assert_eq!(normalize_path_pattern("/base/*", W), "/base\\*");
     }
 
     #[test]
-    fn a_pattern_keeps_its_directory_and_its_star() {
-        let out = normalize_path_pattern("C:/base/dir/*", W);
-        assert!(out.starts_with("C:/base/dir"), "got {}", out);
-        assert!(out.ends_with('*'));
-    }
-
-    #[test]
-    fn a_pattern_without_a_directory_is_just_the_star() {
-        assert_eq!(normalize_path_pattern("*", W), "*");
-        assert!(
-            normalize_path_pattern("no-star", W).ends_with('*'),
-            "a pattern with no directory still gets the star appended"
+    fn a_string_that_does_not_end_in_a_glob_is_not_turned_into_one() {
+        // The anchored regex is the whole point. Each of these has a separator
+        // somewhere, or none at all, and the first draft of this port built a
+        // `dir/*` glob out of every one of them - including a glob for a
+        // directory the caller never named.
+        assert_eq!(normalize_path_pattern("C:/base/dir", W), "C:/base/dir");
+        assert_eq!(normalize_path_pattern("no-star", W), "no-star");
+        assert_eq!(normalize_path_pattern("", W), "");
+        assert_eq!(normalize_path_pattern("C:*", W), "C:*", "a colon is not a separator");
+        assert_eq!(
+            normalize_path_pattern("**", W),
+            "**",
+            "a star before the star is not a separator, so nothing is stripped"
         );
     }
+
+    #[test]
+    fn a_drive_root_directory_keeps_its_separator() {
+        // `C:/*` has the directory `C:`, which matches `/^[A-Za-z]:$/`, so the
+        // TS appends a backslash before normalising - otherwise joining would
+        // produce `C:/*`, a different path.
+        assert_eq!(normalize_path_pattern("C:/*", W), "C:\\*");
+        assert_eq!(normalize_path_pattern("z:/*", W), "z:\\*");
+        // The same shape with a leading slash is NOT a drive root, so it keeps
+        // its own separator instead of gaining one.
+        assert_eq!(normalize_path_pattern("/c:/*", W), "/c:\\*");
+    }
+
+    #[test]
+    fn the_normalize_step_is_the_caller_s_to_supply() {
+        // `normalizePath` calls `realpathSync.native` in the TypeScript, so it
+        // cannot be written down here. It is a parameter instead, which makes
+        // the branch observable: a caller that resolves the path sees its
+        // result in both places the TS calls it.
+        let shout = |p: &str| p.to_uppercase();
+        assert_eq!(normalize_path_pattern_with("no-star", W, shout), "NO-STAR");
+        assert_eq!(normalize_path_pattern_with("c:/base/*", W, shout), "C:/BASE\\*");
+        // And it is not consulted at all on POSIX, or for a bare star.
+        assert_eq!(normalize_path_pattern_with("c:/base/*", P, shout), "c:/base/*");
+        assert_eq!(normalize_path_pattern_with("*", W, shout), "*");
+    }
+
 
     // --- platform ---
 
