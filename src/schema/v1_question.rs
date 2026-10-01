@@ -23,7 +23,7 @@ impl QuestionId {
     pub fn make(id: impl Into<String>) -> Result<Self, InvalidQuestionId> {
         let id = id.into();
         if !id.starts_with(Self::PREFIX) {
-            return Err(InvalidQuestionId { id });
+            return Err(InvalidQuestionId { id, prefix: Self::PREFIX });
         }
         Ok(Self(id))
     }

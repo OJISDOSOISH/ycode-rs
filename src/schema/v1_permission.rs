@@ -31,7 +31,7 @@ impl PermissionId {
     pub fn make(id: impl Into<String>) -> Result<Self, InvalidPermissionId> {
         let id = id.into();
         if !id.starts_with(Self::PREFIX) {
-            return Err(InvalidPermissionId { id });
+            return Err(InvalidPermissionId { id, prefix: Self::PREFIX });
         }
         Ok(Self(id))
     }
