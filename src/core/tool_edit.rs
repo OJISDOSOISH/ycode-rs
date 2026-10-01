@@ -243,7 +243,9 @@ mod tests {
         let shown = preview_lines(&long, '+');
         let body = shown[0].strip_prefix('+').unwrap();
         assert!(body.ends_with("..."));
-        assert_eq!(body.chars().count(), 241);
+        // 240 kept characters plus the three dots, not 240 including them.
+        assert_eq!(body.chars().count(), PREVIEW_LINE_CHARS + 3);
+        assert!(body.starts_with(&"x".repeat(PREVIEW_LINE_CHARS)));
     }
 
     #[test]

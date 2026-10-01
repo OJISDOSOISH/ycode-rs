@@ -98,11 +98,15 @@ pub const BINARY_EXTENSIONS: [&str; 28] = [
 ];
 
 /// Lowercased extension of a resource path, extension included.
+///
+/// `path.extname` in Node: a leading dot marks a hidden file, not an
+/// extension, so `.bashrc` has none. A `rfind('.')` without that check would
+/// report `.bashrc` as an extension and look it up in the binary set.
 fn extension_of(resource: &str) -> String {
     let name = resource.rsplit('/').next().unwrap_or(resource);
     match name.rfind('.') {
+        Some(0) | None => String::new(),
         Some(i) => name[i..].to_lowercase(),
-        None => String::new(),
     }
 }
 
@@ -239,13 +243,15 @@ mod tests {
 
     #[test]
     fn the_thirty_percent_rule_uses_a_strict_comparison() {
-        // 3 of 10 control bytes = 0.3, which is NOT greater than 0.3.
-        let mut bytes = vec![0x01u8; 7];
-        bytes.extend([0x01, 0x01, 0x01]);
+        // 3 control bytes among 10 is 0.3, which is NOT greater than 0.3.
+        // The filler must be genuinely printable: byte 1 is itself a control
+        // byte, so filling with 0x01 would make every byte non-printable.
+        let mut bytes = vec![b'a'; 7];
+        bytes.extend([0x01u8, 0x01, 0x01]);
         assert!(!is_binary("a.txt", &bytes), "exactly 0.3 stays text");
 
-        let mut more = vec![0x01u8; 6];
-        more.extend([0x01, 0x01, 0x01, 0x01]);
+        let mut more = vec![b'a'; 6];
+        more.extend([0x01u8, 0x01, 0x01, 0x01]);
         assert!(is_binary("a.txt", &more), "0.4 is binary");
     }
 
@@ -262,5 +268,14 @@ mod tests {
         assert_eq!(BINARY_EXTENSIONS.len(), 28);
         assert!(BINARY_EXTENSIONS.contains(&".pyc"));
         assert!(!BINARY_EXTENSIONS.contains(&".txt"));
+    }
+
+    #[test]
+    fn a_hidden_file_has_no_extension() {
+        // `path.extname(".bashrc")` is "" in Node, so ".bashrc" must never be
+        // looked up in the set: the name IS the whole basename.
+        assert!(!is_binary(".wasm", b"text"), "a file named .wasm is text");
+        assert!(is_binary("x.wasm", b"text"), "but x.wasm is binary");
+        assert!(!is_binary(".bashrc", b"#!/bin/sh\necho hi\n"));
     }
 }

@@ -40,9 +40,19 @@ pub fn is_path_action(action: &str) -> bool {
 
 /// `expandHome`: `~/x`, `~`, `$HOME`, `$HOME/x`, `$HOME\x` become the home
 /// directory; everything else is returned untouched.
+/// `expandHome` from the TS, case for case.
+///
+/// The slice offsets are the source's and they matter: `~/x` is `home` plus
+/// `resource.slice(1)`, which KEEPS the slash, so the result is `/h/a` and not
+/// `/ha`. Getting that wrong is invisible in a test that only checks a bare
+/// `~`, and obvious everywhere else.
+///
+/// The `$HOME\\` case keeps the backslash for the same reason - `slice(5)` of
+/// `$HOME\\a` is `\\a` - so the result is `/h\\a` and not `/h/a`. The source
+/// does not normalise the separator there, and neither does this.
 pub fn expand_home(resource: &str, home: &str) -> String {
-    if let Some(rest) = resource.strip_prefix("~/") {
-        return format!("{}{}", home, rest);
+    if resource.starts_with("~/") {
+        return format!("{}{}", home, &resource[1..]);
     }
     if resource == "~" {
         return home.to_string();
@@ -50,11 +60,8 @@ pub fn expand_home(resource: &str, home: &str) -> String {
     if resource == "$HOME" {
         return home.to_string();
     }
-    if let Some(rest) = resource.strip_prefix("$HOME/") {
-        return format!("{}{}", home, rest);
-    }
-    if let Some(rest) = resource.strip_prefix("$HOME\\") {
-        return format!("{}{}", home, rest);
+    if resource.starts_with("$HOME/") || resource.starts_with("$HOME\\") {
+        return format!("{}{}", home, &resource[5..]);
     }
     resource.to_string()
 }
@@ -82,19 +89,13 @@ pub fn expand_permissions(rules: &Ruleset, home: &str) -> Ruleset {
 }
 
 /// Name of an agent file, as the TS `decode` computes it.
+/// The agent name a discovered file yields.
+///
+/// `path.relative`, slashes, then one of the four prefixes and the `.md`
+/// suffix - see `super::config_plugin_path` for why `relative` cannot be a
+/// `strip_prefix` here.
 pub fn agent_name_from_path(directory: &str, filepath: &str) -> String {
-    let mut rel = filepath.strip_prefix(directory).unwrap_or(filepath).to_string();
-    rel = rel.replace('\\', "/");
-    for prefix in ["agent/", "agents/", "mode/", "modes/"] {
-        if let Some(rest) = rel.strip_prefix(prefix) {
-            rel = rest.to_string();
-            break;
-        }
-    }
-    if let Some(rest) = rel.strip_suffix(".md") {
-        rel = rest.to_string();
-    }
-    rel
+    super::config_plugin_path::plugin_name(directory, filepath, &super::config_plugin_path::AGENT_PREFIXES)
 }
 
 /// A document is legacy as soon as ONE frontmatter key is unknown.
@@ -201,7 +202,8 @@ mod tests {
         assert_eq!(expand_home("~", "/h"), "/h");
         assert_eq!(expand_home("$HOME", "/h"), "/h");
         assert_eq!(expand_home("$HOME/a", "/h"), "/h/a");
-        assert_eq!(expand_home("$HOME\\a", "/h"), "/h/a");
+        assert_eq!(expand_home("$HOME\\a", "/h"), "/h\\a", "the backslash is kept, as in the source");
+        assert_eq!(expand_home("~other/a", "/h"), "~other/a", "only ~/ and ~ are special");
         assert_eq!(expand_home("/abs", "/h"), "/abs");
         assert_eq!(expand_home("src/**", "/h"), "src/**");
         assert_eq!(expand_home("$OTHER/a", "/h"), "$OTHER/a");

@@ -13,12 +13,15 @@
 
 
 
+
+
 pub mod command;
 pub mod config_agent;
 pub mod config_mcp;
 pub mod config_plugin_agent;
 pub mod config_plugin_command;
 pub mod config_plugin_external;
+pub mod config_plugin_path;
 pub mod config_plugin_provider;
 pub mod config_plugin_skill;
 pub mod config_provider;
@@ -58,6 +61,7 @@ pub mod tool_read;
 pub mod tool_read_filesystem;
 pub mod tool_skill;
 pub mod tool_todowrite;
+pub mod tool_webfetch;
 pub mod tool_write;
 pub mod util_error;
 pub mod websearch;

@@ -65,18 +65,11 @@ pub struct CommandEntry {
 ///
 /// `directory` is the base the file was found under; `filepath` the full path.
 pub fn command_name_from_path(directory: &str, filepath: &str) -> String {
-    let mut rel = filepath.strip_prefix(directory).unwrap_or(filepath).to_string();
-    rel = rel.replace('\\', "/");
-    for prefix in ["command/", "commands/"] {
-        if let Some(rest) = rel.strip_prefix(prefix) {
-            rel = rest.to_string();
-            break;
-        }
-    }
-    if let Some(rest) = rel.strip_suffix(".md") {
-        rel = rest.to_string();
-    }
-    rel
+    super::config_plugin_path::plugin_name(
+        directory,
+        filepath,
+        &super::config_plugin_path::COMMAND_PREFIXES,
+    )
 }
 
 /// Parsed form of `provider/model`, as `ModelV2.parse` returns it.

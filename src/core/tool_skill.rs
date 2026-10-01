@@ -68,11 +68,12 @@ pub const DESCRIPTION: &str = concat!(
 
 /// `path.posix.dirname`, because the skill locations are POSIX paths.
 ///
-/// Faithful to the Node implementation, including two of its quirks that a
-/// naive `rsplit('/')` gets wrong: trailing slashes are ignored, so
-/// `dirname("a/b/")` is `"."` and not `"a/b"`; and a path whose parent would
-/// be empty but which is rooted returns the root, with the double slash for a
-/// path like `//a` preserved.
+/// Faithful to the Node implementation, including the two quirks a naive
+/// `rsplit('/')` gets wrong. Trailing slashes are collapsed rather than
+/// obeyed, so `dirname("a/b/")` is `"a"` - not `"a/b"`, and not `"."`. And a
+/// rooted path whose parent would be empty returns the root, keeping the
+/// double slash for a path like `//a`. Tests pin both, because they are the
+/// cases a short implementation answers differently.
 pub fn dirname(location: &str) -> String {
     if location.is_empty() {
         return ".".to_string();
@@ -178,7 +179,8 @@ mod tests {
         assert_eq!(dirname("a/SKILL.md"), "a");
         assert_eq!(dirname("SKILL.md"), ".", "no separator at all");
         assert_eq!(dirname("/SKILL.md"), "/");
-        assert_eq!(dirname("a/b/"), ".", "trailing slashes are ignored");
+        assert_eq!(dirname("a/b/"), "a", "trailing slashes collapse to the parent");
+        assert_eq!(dirname("a/b//"), "a", "a run of trailing slashes is one");
         assert_eq!(dirname("a"), ".");
         assert_eq!(dirname("/"), "/");
         assert_eq!(dirname(""), ".");
