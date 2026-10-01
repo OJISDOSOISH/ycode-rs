@@ -92,6 +92,11 @@ fn sha1_digest(entree: &[u8]) -> [u8; 20] {
         0xc3d2_e1f0,
     ];
     let mut w = [0u32; 80];
+    // Diagnostic : l IV TEL QUE LE BINAIRE LE VOIT, lu dans `h` et non
+    // reecrit ici. Reprintre la constante n aurait valeur de preuve que si elle
+    // venait de `h`.
+    #[cfg(test)]
+    let iv_vue = [h[0], h[1], h[2], h[3], h[4]];
 
     for bloc in donnees.chunks_exact(64) {
         lire_bloc(bloc, &mut w);
@@ -100,6 +105,8 @@ fn sha1_digest(entree: &[u8]) -> [u8; 20] {
         }
 
         let (mut a, mut b, mut c, mut d, mut e) = (h[0], h[1], h[2], h[3], h[4]);
+        #[cfg(test)]
+        let mut derniers = (0u32, 0u32, 0u32, 0u32, 0u32);
 
         for i in 0..80 {
             let (f, k) = if i < 20 {
@@ -125,6 +132,13 @@ fn sha1_digest(entree: &[u8]) -> [u8; 20] {
             a = temp;
         }
 
+        // Copie de diagnostic : A..E sont declares dans cette boucle, donc hors
+        // de portee apres. Ne change rien au calcul.
+        #[cfg(test)]
+        {
+            derniers = (a, b, c, d, e);
+        }
+
         h[0] = h[0].wrapping_add(a);
         h[1] = h[1].wrapping_add(b);
         h[2] = h[2].wrapping_add(c);
@@ -139,32 +153,35 @@ fn sha1_digest(entree: &[u8]) -> [u8; 20] {
     // TEMPORARY DIAGNOSTIC -- retirer avec le test homonyme.
     //
     // On imprime aussi l IV tel que le binaire le voit, et les cinq registres
-    // A..E apres la boucle. Si l IV est celle du SHA-1 et que A..E valent
-    // 72f480ed 6e9d9f84 999ae2f1 852dc41a ec052519 -- les valeurs qu'une
-    // reference calcule sur CE remplissage -- alors h ne peut pas valoir autre
-    // chose que da39a3ee. S il vaut 3485e413 quand meme, le binaire n execute
-    // pas ce fichier, et c est le build qui est en cause, pas le portage.
+    // A..E du DERNIER bloc. Ils sont declares dans la boucle, donc hors de portee
+    // ici : `derniers` en garde une copie, ce qui ne change rien au calcul.
+    //
+    // Si l IV est celle du SHA-1 et que A..E valent 72f480ed 6e9d9f84 999ae2f1
+    // 852dc41a ec052519 -- les valeurs qu'une reference calcule sur CE
+    // remplissage -- alors h ne peut pas valoir autre chose que da39a3ee. S il
+    // vaut 3485e413 quand meme, le binaire n execute pas ce fichier, et c est le
+    // build qui est en cause, pas le portage.
     #[cfg(test)]
     if entree.is_empty() {
         eprintln!(
             "DIAG blocs={} w0={:08x} w1={:08x} w16={:08x} w79={:08x} \
-             IV={:08x}{:08x}{:08x}{:08x}{:08x} \
+             IVvue={:08x}{:08x}{:08x}{:08x}{:08x} \
              abcde={:08x}{:08x}{:08x}{:08x}{:08x} h={:08x}{:08x}{:08x}{:08x}{:08x}",
             donnees.chunks_exact(64).count(),
             w[0],
             w[1],
             w[16],
             w[79],
-            0x6745_2301u32,
-            0xefcd_ab89u32,
-            0x98ba_dcfeu32,
-            0x1032_5476u32,
-            0xc3d2_e1f0u32,
-            a,
-            b,
-            c,
-            d,
-            e,
+            iv_vue[0],
+            iv_vue[1],
+            iv_vue[2],
+            iv_vue[3],
+            iv_vue[4],
+            derniers.0,
+            derniers.1,
+            derniers.2,
+            derniers.3,
+            derniers.4,
             h[0],
             h[1],
             h[2],
