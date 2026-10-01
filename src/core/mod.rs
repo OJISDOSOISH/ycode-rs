@@ -19,6 +19,7 @@
 
 
 
+
 pub mod command;
 pub mod config_agent;
 pub mod config_mcp;
@@ -62,6 +63,7 @@ pub mod tool_edit;
 pub mod tool_glob;
 pub mod tool_grep;
 pub mod tool_http_body;
+pub mod tool_output_store;
 pub mod tool_question;
 pub mod tool_read;
 pub mod tool_read_filesystem;
