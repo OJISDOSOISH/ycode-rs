@@ -483,7 +483,8 @@ mod tests {
             "azure",
             &AzureOptions {
                 resource_name: Some("r".to_string()),
-                base_url: None
+                base_url: None,
+                use_completion_urls: None
             },
             None
         ));
@@ -491,7 +492,8 @@ mod tests {
             "azure",
             &AzureOptions {
                 resource_name: None,
-                base_url: Some("https://x".to_string())
+                base_url: Some("https://x".to_string()),
+                use_completion_urls: None
             },
             None
         ));

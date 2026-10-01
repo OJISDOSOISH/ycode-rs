@@ -323,7 +323,7 @@ pub fn fusionner_credential(
 ///
 /// Portage de `extractAccountID` : `claim(id_token) ?? claim(access_token)`.
 pub fn extraire_compte(jetons: &TokenResponse) -> Option<String> {
-    revendication(&jetons.id_token).unwrap_or_else(|| revendication(&jetons.access_token))
+    Some(revendication(&jetons.id_token).unwrap_or_else(|| revendication(&jetons.access_token)))
 }
 
 /// Lit `chatgpt_account_id` dans la charge utile d'un JWT.
@@ -337,12 +337,23 @@ pub fn extraire_compte(jetons: &TokenResponse) -> Option<String> {
 /// explicite pour distinguer les deux cas.
 pub fn revendication(token: &str) -> Option<String> {
     let partie = token.split('.').nth(1)?;
-    decoder_base64url(partie).ok()?.parse::<Claims>().ok().and_then(|claims| {
-        claims
-            .chatgpt_account_id
-            .or_else(|| claims.auth_openai.and_then(|auth| auth.chatgpt_account_id))
-            .or_else(|| claims.organizations.and_then(|orgs| orgs.into_iter().next().map(|o| o.id)))
-    })
+    // `decoder_base64url` yields bytes, and `parse` is a `str` method: the UTF-8
+    // conversion has to be explicit. Naming the type is also required here,
+    // because `.and_then` hands the next closure an un-inferred generic.
+    decoder_base64url(partie)
+        .ok()
+        .and_then(|octets| std::str::from_utf8(&octets).ok())
+        .and_then(|texte| serde_json::from_str::<Claims>(texte).ok())
+        .and_then(|claims| {
+            claims
+                .chatgpt_account_id
+                .or_else(|| claims.auth_openai.and_then(|auth| auth.chatgpt_account_id))
+                .or_else(|| {
+                    claims
+                        .organizations
+                        .and_then(|orgs| orgs.into_iter().next().map(|o| o.id))
+                })
+        })
 }
 
 /// Encode une chaine en `application/x-www-form-urlencoded`, comme

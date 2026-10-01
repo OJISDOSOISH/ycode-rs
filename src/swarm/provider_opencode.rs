@@ -333,7 +333,7 @@ pub fn sans_credentials(body: Option<&Value>) -> Value {
     Value::Object(
         carte
             .iter()
-            .filter(|(cle, _)| cle != "apiKey" && cle != "headers")
+            .filter(|(cle, _)| cle.as_str() != "apiKey" && cle.as_str() != "headers")
             .map(|(cle, valeur)| (cle.clone(), valeur.clone()))
             .collect(),
     )

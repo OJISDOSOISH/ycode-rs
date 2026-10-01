@@ -885,12 +885,12 @@ mod tests {
     #[test]
     fn cout_par_defaut_zero_sur_champs_absents() {
         // `input?.input ?? 0` : nullite, donc un 0 present reste 0.
-        let cout = cout(Some(&serde_json::from_str(r#"{"input":3,"output":15}"#).unwrap()));
-        assert_eq!(cout.len(), 1);
-        assert_eq!(cout[0].input, 3.0);
-        assert_eq!(cout[0].cache.read, 0.0);
-        assert_eq!(cout[0].cache.write, 0.0);
-        assert!(cout[0].tier.is_none());
+        let couts = cout(Some(&serde_json::from_str(r#"{"input":3,"output":15}"#).unwrap()));
+        assert_eq!(couts.len(), 1);
+        assert_eq!(couts[0].input, 3.0);
+        assert_eq!(couts[0].cache.read, 0.0);
+        assert_eq!(couts[0].cache.write, 0.0);
+        assert!(couts[0].tier.is_none());
 
         let nul = cout(None);
         assert_eq!(nul.len(), 1);

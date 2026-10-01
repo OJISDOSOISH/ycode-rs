@@ -199,7 +199,7 @@ pub fn extraire_service_key(options: &Value) -> Option<&str> {
 /// C'est le `??` de la source : `process.env.AICORE_SERVICE_KEY ??
 /// evt.options.serviceKey`. Un `??` ne remplace que `null`/`undefined`,
 /// donc une chaine vide dans l'environnement gagne et masque l'option.
-pub fn resoudre_service_key<'a>(options: &Value, env: &'a Environnement) -> Option<&'a str> {
+pub fn resoudre_service_key<'a>(options: &'a Value, env: &'a Environnement) -> Option<&'a str> {
     match &env.service_key {
         Some(cle) => Some(cle.as_str()),
         None => extraire_service_key(options),
@@ -273,7 +273,7 @@ where
         }
     }
 
-    let chemin = resoudre_chemin_paquet(&event.package, installer(&event.package))
+    let chemin = resoudre_chemin_paquet(&event.package, installer(&event.package).as_deref())
         .ok_or_else(|| Erreur::PointEntreeManquant(event.package.clone()))?;
 
     // Une cle (resolue) impose les parametres d'environnement ; sinon `{}`.

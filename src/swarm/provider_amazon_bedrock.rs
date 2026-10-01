@@ -636,7 +636,7 @@ impl BedrockPlugin {
             _ => env.profile.clone(),
         };
         let region = match options.get("region") {
-            Some(Value::String(value)) => Some(value.clone()),
+            Some(Value::String(value)) => value.clone(),
             _ => env.region.clone().unwrap_or_else(|| DEFAULT_REGION.to_string()),
         };
         let bearer_token = env.bearer_token.clone().or_else(|| match options.get("bearerToken") {

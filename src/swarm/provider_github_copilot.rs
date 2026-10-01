@@ -225,7 +225,7 @@ where
 ///
 /// Seuls `providerID` et `api.id` sont lus ; le filtre sur le fournisseur et
 /// l'identifiant d'api sont reproduits tels quels.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct LanguageModelRef {
     /// `evt.model.providerID`.
     #[serde(rename = "providerID")]
@@ -236,7 +236,7 @@ pub struct LanguageModelRef {
 }
 
 /// La reference `evt.model.api` lue par le crochet `language`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct LanguageApiRef {
     /// `evt.model.api.id`, l'identifiant d'api teste contre la regex.
     #[serde(rename = "id")]
