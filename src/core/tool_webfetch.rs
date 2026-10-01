@@ -250,7 +250,7 @@ pub fn extract_text_from_html(html: &str) -> String {
                 i += 1;
             }
             if skip_depth == 0 {
-                text.extend_from_slice(&bytes[start..i]);
+                text.extend(bytes[start..i].iter().copied());
             }
             continue;
         }
@@ -272,7 +272,7 @@ pub fn extract_text_from_html(html: &str) -> String {
         if j >= bytes.len() {
             // No closing angle bracket: htmlparser2 would keep this as text.
             if skip_depth == 0 {
-                text.extend_from_slice(&bytes[i..]);
+                text.extend(bytes[i..].iter().copied());
             }
             break;
         }
