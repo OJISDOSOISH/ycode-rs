@@ -251,7 +251,9 @@ fn split_url(input: &str) -> Option<UrlParts<'_>> {
         None => (rest, ""),
     };
     let path = path.split(['?', '#']).next().unwrap_or("");
-    Some(UrlParts { protocol: &input[..scheme.len()], host, path })
+    // `URL.protocol` carries the colon: the source compares it against
+    // `"file:"`, not `"file"`, and every caller in this file does the same.
+    Some(UrlParts { protocol: &input[..scheme.len() + 1], host, path })
 }
 
 /// `parse`: the whole decision tree, or `None`.
