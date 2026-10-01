@@ -69,7 +69,7 @@ pub struct Options<S: Send + Sync + 'static> {
     pub finalize: Option<Box<dyn Fn(&S) + Send + Sync>>,
 }
 
-struct Registration<S> {
+struct Entry<S> {
     id: usize,
     active: bool,
     run: Transform<S>,
@@ -77,7 +77,7 @@ struct Registration<S> {
 
 struct Inner<S> {
     committed: Option<S>,
-    transforms: Vec<Registration<S>>,
+    transforms: Vec<Entry<S>>,
 }
 
 thread_local! {
@@ -139,8 +139,10 @@ impl<S: Send + Sync + 'static> Store<S> {
         }
     }
 
-    /// `get`: the committed value, or `None` before the first commit - which
-    /// cannot happen through `new`, so this only guards a poisoned lock.
+    /// `get`: the committed value.
+    ///
+    /// The `S: Clone` bound is on this one method, not on the store: publishing
+    /// a value does not need a copy, only reading one out does.
     pub fn get(&self) -> Option<S>
     where
         S: Clone,
@@ -149,19 +151,21 @@ impl<S: Send + Sync + 'static> Store<S> {
     }
 
     /// `materialize`: a fresh base, every transform in order, then commit.
-    fn materialize_locked(&self, inner: &mut Inner<S>) -> Option<S> {
+    ///
+    /// Published in place, with no clone: bounding `S: Clone` here would push a
+    /// bound the store does not otherwise need onto every caller.
+    fn materialize_locked(&self, inner: &mut Inner<S>) {
         let mut next = (self.initial)();
-        for registration in &inner.transforms {
-            if !registration.active {
+        for entry in &inner.transforms {
+            if !entry.active {
                 continue;
             }
-            (registration.run)(&mut next);
+            (entry.run)(&mut next);
         }
         if let Some(finalize) = &self.finalize {
             finalize(&next);
         }
-        inner.committed = Some(next.clone());
-        Some(next)
+        inner.committed = Some(next);
     }
 
     /// `reload`: one permit, then materialize.
@@ -182,7 +186,7 @@ impl<S: Send + Sync + 'static> Store<S> {
             let Ok(mut inner) = self.inner.lock() else {
                 return Registration { id };
             };
-            inner.transforms.push(Registration { id, active: true, run: update });
+            inner.transforms.push(Entry { id, active: true, run: update });
         }
         if in_batch() {
             queue_reload(id);
