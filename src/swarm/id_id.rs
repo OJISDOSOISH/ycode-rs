@@ -558,15 +558,15 @@ mod tests {
 
     #[test]
     fn an_ascending_id_leaves_the_counter_to_the_low_twelve_bits_only() {
-        // 1_757_000_000 * 4096 = 0x68b9b1400000 in 48 bits. The counter is
-        // added before masking, so it can only move the last three hex digits
-        // and the first nine are fixed. This assertion therefore holds no
-        // matter what the process-wide counter happens to be, which is what
-        // lets the test suite run in parallel without a lock.
+        // 1_757_000_000 * 4096 = 0x68b9b1400000, which is only 47 bits, so the
+        // twelve hex characters of the segment are "068b9b140001" and the
+        // counter is written into the last three. The first nine are therefore
+        // fixed no matter what the process-wide counter happens to be, which is
+        // what lets the test suite run in parallel without a lock.
         let id = create("ses", Direction::Ascending, Some(TS));
         let segment = time_segment(&id);
         assert!(
-            segment.starts_with("68b9b1400"),
+            segment.starts_with("068b9b1400"),
             "the high 36 bits moved: {segment:?}"
         );
     }
@@ -612,9 +612,11 @@ mod tests {
         let descending_id = create("ses", Direction::Descending, Some(1));
         let up = time_segment(&ascending_id);
         let down = time_segment(&descending_id);
-        // timestamp=1, counter=1 -> current=4097=0x1001 -> 14 hex="00000000001001" -> first 12="000000000010"
-        assert!(up.starts_with("000000000"), "{up:?}");
-        // descending: ~4097 & 0xFFFFFFFFFFFFFF = 0xFFFFFFFFFFFFEFFE -> first 12="ffffffffeffe"
+        // timestamp=1, counter=1 -> current = 4097 = 0x1001, low 48 bits are
+        // 0x00000000001001, so the ascending segment is "000000001001".
+        assert!(up.starts_with("000000001"), "{up:?}");
+        // descending: the low 48 bits of ~0x1001 are 0xFFFFFFFFFFFEFFFE masked to
+        // 48 bits, i.e. "ffffffffeffe".
         assert!(down.starts_with("ffffffff"), "{down:?}");
         assert_ne!(up, down);
     }

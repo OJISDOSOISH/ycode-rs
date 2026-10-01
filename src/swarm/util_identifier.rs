@@ -48,6 +48,11 @@ const RANDOM_LENGTH: usize = LENGTH - TIME_LENGTH;
 /// Alphabet de la partie aleatoire, dans l'ordre exact du TypeScript.
 const CHARS: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
+/// Alphabet hexadecimal minuscule du segment temporel, dans l'ordre de
+/// `Number(byte).toString(16)` : minuscules, et c'est une partie du contrat
+/// (les identifiants se comparent et se decoupent sur cette casse).
+const HEX: &[u8] = b"0123456789abcdef";
+
 /// La constante `0x1000n` d'origine : la place du compteur dans l'entier.
 const BASE: i128 = 0x1000;
 
@@ -133,33 +138,32 @@ pub fn create_at(descending_order: bool, timestamp: i64) -> String {
 /// - `descending_order` correspond a l'inversion par `~` ;
 /// - `random` est la liste des octets aleatoires, convertis en caracteres.
 fn compose(descending_order: bool, timestamp: i64, counter: i64, random: &[u8]) -> String {
-    // The source divides by 4096 FIRST, then formats as 12 hex chars (36 bits).
-    // This is the millisecond timestamp (timestamp + counter/4096, floor).
-    let time_value = if descending_order {
-        // For descending, the source uses ~current then divides by 4096.
-        // current = timestamp * 4096 + counter
-        // ~current = -current - 1 (two's complement)
-        // We need the low 36 bits of the complemented value.
-        // The source uses BigInt which is arbitrary precision, so ~current
-        // gives an infinite sequence of 1s in two's complement.
-        // Taking the low 36 bits after division by 4096:
-        // ~current / 4096 = ~(timestamp + counter/4096) = -timestamp - 1 (since counter < 4096)
-        // Then take low 36 bits.
-        let current = (timestamp as i64) * 4096 + counter;
-        let complemented = !current;
-        // Get low 36 bits of (complemented / 4096)
-        ((complemented / 4096) & 0xFFFFFFFFF) as i64
-    } else {
-        // Ascending: (timestamp * 4096 + counter) / 4096 = timestamp + counter/4096
-        // Since counter < 4096, this equals timestamp.
-        timestamp
-    };
-    
-    // Format as 12 hex chars (36 bits), zero-padded
-    let time_hex = format!("{:012x}", time_value & 0xFFFFFFFFF);
+    // Le contrat exact du TypeScript, sans raccourci :
+    //
+    //     const current = BigInt(timestamp) * 0x1000n + BigInt(counter)
+    //     const value = descending ? ~current : current
+    //     time = 6 octets (value >> (40 - 8 * index)) & 0xff, en hex minuscule
+    //
+    // Les 6 octets sont donc les 48 bits de poids faible de `value`, ecrits du
+    // plus fort au plus faible. Il n'y a NI division par 0x1000, NI fenetre de
+    // 36 bits : le compteur occupe les 12 bits de poids faible du champ, donc
+    // ses trois derniers caracteres hex. On reproduit le decalage puis le
+    // masquage octet par octet plutot qu'une seule expression, parce que `~`
+    // sur un entier de taille machine signe ne se comporte comme le `BigInt`
+    // arbitraire de la source que si on lit explicitement les bits bas.
+    //
+    // `i128` porte le produit `timestamp * 4096` (un timestamp en 2026 fait 41
+    // bits, fois 4096 cela fait 53 bits) sans debordement, et son complement a
+    // un se lit correctement avec `& 0xff` sur chaque octet comme en JS.
+    let current = (timestamp as i128) * BASE + counter as i128;
+    let value = if descending_order { !current } else { current };
 
     let mut out = String::with_capacity(TIME_LENGTH + random.len());
-    out.push_str(&time_hex);
+    for index in 0..6i32 {
+        let octet = ((value >> (40 - 8 * index)) & 0xff) as u8;
+        out.push(HEX[(octet >> 4) as usize] as char);
+        out.push(HEX[(octet & 0x0f) as usize] as char);
+    }
     for &octet in random {
         out.push(CHARS[(octet % 62) as usize] as char);
     }
@@ -228,20 +232,22 @@ mod tests {
     fn un_identifiant_ascendant_tient_toujours_dans_le_format_attendu() {
         let identifiant = compose(false, 1, 1, &[0u8; RANDOM_LENGTH]);
         assert_eq!(identifiant.len(), LENGTH);
-        // time segment: 12 hex chars from 56-bit value (timestamp=1, counter=1)
-        // 1*4096+1=4097=0x1001 -> 56-bit=0x00000000001001 -> first 12 hex="000000000010"
-        // random: 14 zeros -> '0' x 14
-        assert_eq!(identifiant, "00000000001000000000000000");
+        // Segment temporel : 12 caracteres hex des 6 octets de poids faible.
+        // timestamp=1, counter=1 -> current = 1*4096+1 = 4097 = 0x1001, donc
+        // les 48 bits bas valent 0x00000000001001 -> "000000001001".
+        // Partie aleatoire : 14 octets nuls -> '0' x 14.
+        assert_eq!(identifiant, "00000000100100000000000000");
     }
 
     #[test]
     fn un_identifiant_descendant_complemente_la_partie_temporelle() {
         // Pour un timestamp de 1 et un compteur de 1, la valeur ascendante vaut
-        // 4097 ; son complement a deux complements sur 56 bits.
+        // 4097 = 0x1001. Son complement a un, lu sur les 48 bits de poids
+        // faible de `value`, vaut 0xFFFFFFFFFFFEFFFE & 0xFFFFFFFFFFFF, soit
+        // "ffffffffeffe" : le compteur, aux 12 bits bas, reste visible.
         let identifiant = compose(true, 1, 1, &[0u8; RANDOM_LENGTH]);
         assert_eq!(identifiant.len(), LENGTH);
-        // ~4097 & 0xffffffffffffff = 0xffffffffffffeffe -> first 12 hex="fffffffffefe"
-        assert_eq!(identifiant, "fffffffffefe00000000000000");
+        assert_eq!(identifiant, "ffffffffeffe00000000000000");
     }
 
     #[test]
@@ -261,15 +267,15 @@ mod tests {
         let _garde = verrouiller();
         let premier = create_at(false, MILLE);
         let second = create_at(false, MILLE);
-        // Meme milliseonde : le compteur passe de 1 a 2.
-        // Le segment temporel (12 hex) ne change pas pour counter < 4096
-        // car on prend les 48 bits de poids fort de la valeur 56 bits.
+        // Meme milliseconde : le compteur passe de 1 a 2, ce qui n'ecrit que
+        // dans les trois derniers caracteres hex du segment temporel (les 12
+        // bits bas de `current`), pas dans les neuf premiers.
         assert_eq!(premier.len(), LENGTH);
-        assert_eq!(&premier[..TIME_LENGTH], &second[..TIME_LENGTH]);
-        // Le dernier caractere hex du segment temporel encode counter[11:8]
-        // Pour counter=1 et 2, c'est 0.
-        assert!(premier[..TIME_LENGTH].ends_with('0'));
-        assert!(second[..TIME_LENGTH].ends_with('0'));
+        assert_eq!(&premier[..TIME_LENGTH - 3], &second[..TIME_LENGTH - 3]);
+        // Le compteur est visible dans les trois derniers caracteres hex :
+        // counter=1 -> "...001", counter=2 -> "...002".
+        assert!(premier[..TIME_LENGTH].ends_with("001"));
+        assert!(second[..TIME_LENGTH].ends_with("002"));
         // La partie aleatoire differencie les deux identifiants.
         assert_ne!(premier, second);
     }
@@ -279,11 +285,14 @@ mod tests {
         let _garde = verrouiller();
         let premier = create_at(false, MILLE);
         let second = create_at(false, MILLE + 1);
-        // Milliseonde suivante : le segment temporel change.
+        // Milliseconde suivante : le compteur repart de 1 et le milliseconde
+        // ecrite dans les neuf premiers caracteres hex change.
         assert_ne!(&premier[..TIME_LENGTH], &second[..TIME_LENGTH]);
-        // Le dernier caractere hex du segment temporel est 0 pour counter=1.
-        assert!(premier[..TIME_LENGTH].ends_with('0'));
-        assert!(second[..TIME_LENGTH].ends_with('0'));
+        // Dans les deux cas le compteur vaut 1, donc les trois derniers
+        // caracteres hex sont "001" (le milliseconde ne touche pas a la
+        // partie basse tant qu'il reste dans la meme fenetre de 12 bits).
+        assert!(premier[..TIME_LENGTH].ends_with("001"));
+        assert!(second[..TIME_LENGTH].ends_with("001"));
     }
 
     #[test]
