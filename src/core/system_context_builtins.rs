@@ -78,10 +78,8 @@ mod tests {
     fn environment_reports_no_when_not_a_git_repo() {
         let input = EnvironmentInput {
             is_directory_a_git_repo: false,
-            ..EnvironmentInput {
-                working_directory: "/w".to_string(),
-                workspace_root_folder: "/w".to_string(),
-            }
+            working_directory: "/w".to_string(),
+            workspace_root_folder: "/w".to_string(),
         };
         assert!(render_environment(&input).contains("Is directory a git repo: no"));
     }

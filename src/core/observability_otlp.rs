@@ -50,8 +50,8 @@ pub fn parse_headers(raw: Option<&str>) -> std::collections::HashMap<String, Str
 
 /// `resource.attributes` parsing from `OTEL_RESOURCE_ATTRIBUTES`. Entries
 /// before the first `=` are dropped (index < 1 guard in the source).
-pub fn parse_resource_attributes(raw: &str) -> std::collections::HashMap<String, String> {
-    let mut out = std::collections::HashMap::new();
+pub fn parse_resource_attributes(raw: &str) -> std::collections::BTreeMap<String, String> {
+    let mut out = std::collections::BTreeMap::new();
     for entry in raw.split(',') {
         let index = entry.find('=');
         let index = match index {
