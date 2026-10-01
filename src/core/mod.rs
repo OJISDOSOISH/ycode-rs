@@ -12,6 +12,7 @@
 
 
 
+
 pub mod command;
 pub mod config_agent;
 pub mod config_mcp;
@@ -55,6 +56,7 @@ pub mod tool_http_body;
 pub mod tool_question;
 pub mod tool_read;
 pub mod tool_read_filesystem;
+pub mod tool_skill;
 pub mod tool_todowrite;
 pub mod tool_write;
 pub mod util_error;
