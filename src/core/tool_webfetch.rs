@@ -250,7 +250,9 @@ pub fn extract_text_from_html(html: &str) -> String {
                 i += 1;
             }
             if skip_depth == 0 {
-                text.push_str(std::str::from_utf8(&bytes[start..i]).unwrap_or(""));
+                // `bytes` holds `char`, not `u8`, so this is a copy, not a
+                // decode: `from_utf8` here would not even typecheck.
+                text.extend(bytes[start..i].iter().copied());
             }
             continue;
         }
@@ -272,7 +274,7 @@ pub fn extract_text_from_html(html: &str) -> String {
         if j >= bytes.len() {
             // No closing angle bracket: htmlparser2 would keep this as text.
             if skip_depth == 0 {
-                text.push_str(std::str::from_utf8(&bytes[i..]).unwrap_or(""));
+                text.extend(bytes[i..].iter().copied());
             }
             break;
         }

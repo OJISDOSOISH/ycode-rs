@@ -85,7 +85,7 @@ pub fn to_model_content(input: &Input, output: &Output) -> Vec<(String, String)>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::question::{Info, Option_};
+    use crate::question::Option_;
 
     fn prompt(question: &str) -> Prompt {
         Prompt {

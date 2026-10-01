@@ -1,4 +1,4 @@
-﻿//! Port of the portable part of `opencode/packages/core/src/tool/registry.ts`.
+//! Port of the portable part of `opencode/packages/core/src/tool/registry.ts`.
 //!
 //! The Effect service, the output store and the application-tools bridge are
 //! not ported. What is ported is the registry's two decisions, and both of
@@ -32,7 +32,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::permission::{Effect as RuleEffect, Rule, Ruleset};
+use crate::permission::{Effect as RuleEffect, Ruleset};
 
 /// A tool as the registry stores it. The TS keeps an opaque `identity` beside
 /// it and a scope token; only the identity survives here, because comparing it
@@ -173,6 +173,7 @@ pub fn wholly_disabled(action: &str, rules: &Ruleset) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::permission::Rule;
 
     fn reg(identity: u64, action: &str) -> Registration {
         Registration { identity, action: action.to_string() }
