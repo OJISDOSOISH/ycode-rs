@@ -281,9 +281,14 @@ where
 
         match next {
             Next::Chain => {
-                // Meme entree, `force = false` : le successeur garde le `done`
-                // de l'entree courante, comme `start(key, entry, false, true)`
-                // dans le TS.
+                // Meme entree, `force = false`, comme
+                // `start(key, entry, false, true)` dans le TS. L'entree
+                // courante reste dans la map pour que le successeur la
+                // retrouve, et `done` n'est PAS complete ici : le TS sort de
+                // `settle` par un `return` precede de rien, si bien que c'est
+                // le `settle` du successeur qui complete `done`, plus tard.
+                // Completer ici libererait les attenteurs trop tot et
+                // changerait la semantique de coalescence.
                 Self::fork(active, drain, key.clone(), false);
             }
             Next::Replace => {

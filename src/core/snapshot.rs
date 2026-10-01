@@ -259,9 +259,16 @@ fn join_and_normalize(base: &str, rel: &str) -> String {
 }
 
 /// Dit si un chemin absolu normalise reste dans le worktree.
+///
+/// Les deux cotes passent par `join_and_normalize` : sans resoudre `..`, un
+/// chemin comme `/repo/proj/../autre` commence lexicalement par `/repo/proj`
+/// et seemerait donc rester dans le projet, alors qu il en sort. Meme
+/// precaution que dans `scope_relative`.
 fn contains_path(worktree: &str, absolute: &str) -> bool {
-    let base = trim_trailing_slash(normalize_sep(worktree).as_str()).to_string();
-    let target = trim_trailing_slash(normalize_sep(absolute).as_str()).to_string();
+    let base_norm = join_and_normalize("/", worktree);
+    let target_norm = join_and_normalize("/", absolute);
+    let base = trim_trailing_slash(base_norm.as_str()).to_string();
+    let target = trim_trailing_slash(target_norm.as_str()).to_string();
     target == base || target.starts_with(&format!("{}/", base))
 }
 
@@ -272,7 +279,10 @@ fn contains_path(worktree: &str, absolute: &str) -> bool {
 /// sort du projet par une erreur capture.
 pub fn scope_relative(worktree: &str, location_dir: &str) -> Result<RelativePath, SnapshotError> {
     let base = trim_trailing_slash(normalize_sep(worktree).as_str()).to_string();
-    let target = trim_trailing_slash(normalize_sep(location_dir).as_str()).to_string();
+    // Resolve `..` and `.` segments in the target before prefix check,
+    // so paths like "/repo/proj/../autre" are detected as escaping.
+    let target = join_and_normalize("/", location_dir);
+    let target = trim_trailing_slash(target.as_str()).to_string();
     if target == base {
         return Ok(RelativePath::new("."));
     }

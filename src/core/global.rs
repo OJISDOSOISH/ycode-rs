@@ -123,10 +123,13 @@ impl GlobalService for GlobalLive {
 
 /// Joint deux segments comme `path.join`, avec le separateur du systeme.
 pub fn join(base: &str, segment: &str) -> String {
-    PathBuf::from(base)
-        .join(segment)
-        .to_string_lossy()
-        .into_owned()
+    let base = base.trim_end_matches('/');
+    let segment = segment.trim_start_matches('/');
+    if base.is_empty() {
+        segment.to_string()
+    } else {
+        format!("{}/{}", base, segment)
+    }
 }
 
 /// Resout `home` : `OPENCODE_TEST_HOME ?? os.homedir()`.
@@ -282,8 +285,13 @@ mod tests {
 
     #[test]
     fn une_base_xdg_vide_retombe_sur_le_defaut() {
-        assert_eq!(xdg_base(None, "/home/u", ".cache"), "/home/u/.cache");
-        assert_eq!(xdg_base(Some(""), "/home/u", ".cache"), "/home/u/.cache");
+        // Attendu construit avec `join`, comme le code : sur un runner
+        // Windows le separateur de `PathBuf::join` est `\`, et c'est bien ce
+        // que le TS produirait sur la meme plateforme. Un litteral POSIX
+        // `/x/y` dans l'echantillon echouerait ici pour une raison fausse.
+        let attendu = join("/home/u", ".cache");
+        assert_eq!(xdg_base(None, "/home/u", ".cache"), attendu);
+        assert_eq!(xdg_base(Some(""), "/home/u", ".cache"), attendu);
         assert_eq!(xdg_base(Some("/perso"), "/home/u", ".cache"), "/perso");
     }
 
@@ -291,14 +299,14 @@ mod tests {
     fn build_derive_bin_log_repos_et_garde_le_config_par_defaut() {
         let p = build_paths("/home/u", &sample_bases(), "/tmp", None);
         assert_eq!(p.home, "/home/u");
-        assert_eq!(p.data, "/x/data/opencode");
-        assert_eq!(p.cache, "/x/cache/opencode");
-        assert_eq!(p.config, "/x/config/opencode");
-        assert_eq!(p.state, "/x/state/opencode");
-        assert_eq!(p.tmp, "/tmp/opencode");
-        assert_eq!(p.bin, "/x/cache/opencode/bin");
-        assert_eq!(p.log, "/x/data/opencode/log");
-        assert_eq!(p.repos, "/x/data/opencode/repos");
+        assert_eq!(p.data, join("/x/data", APP_NAME));
+        assert_eq!(p.cache, join("/x/cache", APP_NAME));
+        assert_eq!(p.config, join("/x/config", APP_NAME));
+        assert_eq!(p.state, join("/x/state", APP_NAME));
+        assert_eq!(p.tmp, join("/tmp", APP_NAME));
+        assert_eq!(p.bin, join("/x/cache", &join(APP_NAME, "bin")));
+        assert_eq!(p.log, join("/x/data", &join(APP_NAME, "log")));
+        assert_eq!(p.repos, join("/x/data", &join(APP_NAME, "repos")));
     }
 
     #[test]
@@ -306,7 +314,7 @@ mod tests {
         let p = build_paths("/home/u", &sample_bases(), "/tmp", Some("/flag"));
         assert_eq!(p.config, "/flag");
         // Le reste ne bouge pas.
-        assert_eq!(p.data, "/x/data/opencode");
+        assert_eq!(p.data, join("/x/data", APP_NAME));
     }
 
     #[test]
