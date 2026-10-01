@@ -37,6 +37,14 @@ pub fn relative(from: &str, to: &str) -> String {
     while shared < from_parts.len() && shared < to_parts.len() && from_parts[shared] == to_parts[shared] {
         shared += 1;
     }
+    // Node's loop only remembers a shared SEPARATOR, not a shared prefix. When
+    // nothing in common was ever separated, `lastCommonSep` is still -1 and it
+    // returns the target untouched - no `..` at all. That is what happens to a
+    // Windows-shaped path on a POSIX host: `C:\base` holds no separator, so
+    // `C:\base\agent\plan.md` shares no segment and comes back whole.
+    if shared == 0 && !from.starts_with('/') && !to.starts_with('/') {
+        return to_parts.join("/");
+    }
     let mut out: Vec<String> = Vec::with_capacity(from_parts.len() + to_parts.len());
     for _ in shared..from_parts.len() {
         out.push("..".to_string());
@@ -167,14 +175,27 @@ mod tests {
 
     #[test]
     fn a_name_that_is_only_the_prefix_collapses_to_nothing() {
-        assert_eq!(plugin_name("/base", "/base/agent/", &AGENT_PREFIXES), "");
+        // `relative("/base", "/base/agent/")` is "agent": the trailing slash
+        // collapses and leaves no `agent/` to strip. The name is the prefix.
+        assert_eq!(plugin_name("/base", "/base/agent/", &AGENT_PREFIXES), "agent");
     }
 
     #[test]
-    fn a_windows_style_separator_is_normalised_before_matching() {
+    fn a_windows_shaped_path_has_no_segments_to_compare() {
+        // On a POSIX host a backslash is not a separator, so `C:\base` and
+        // `C:\base\agent\plan.md` share no separator and Node's `relative`
+        // returns the target whole. The backslashes are then folded to slashes,
+        // and the prefix no longer sits at the start, so nothing is stripped.
+        // A Windows host would use the win32 branch of `path.relative` and get
+        // "plan" instead - that divergence is documented, not papered over.
         assert_eq!(
             plugin_name("C:\\base", "C:\\base\\agent\\plan.md", &AGENT_PREFIXES),
-            "plan"
+            "C:/base/agent/plan.md"
         );
+    }
+
+    #[test]
+    fn two_unrooted_paths_sharing_no_segment_return_the_target() {
+        assert_eq!(relative("a/b", "c/d.md"), "c/d.md");
     }
 }

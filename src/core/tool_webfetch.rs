@@ -267,19 +267,39 @@ pub fn extract_text_from_html(html: &str) -> String {
         }
         let closing = bytes.get(i + 1) == Some(&'/');
         let name_start = if closing { i + 2 } else { i + 1 };
+        // The tag name runs to the first character that cannot be part of one.
         let mut j = name_start;
-        while j < bytes.len() && bytes[j] != '>' && !bytes[j].is_whitespace() && bytes[j] != '/' {
+        while j < bytes.len() && (bytes[j].is_alphanumeric() || bytes[j] == '-' || bytes[j] == '_' || bytes[j] == ':') {
             j += 1;
         }
-        if j >= bytes.len() {
+        let name: String = bytes[name_start..j].iter().collect::<String>().to_lowercase();
+        // Then the whole tag runs to its own `>`, skipping any that sits
+        // inside a quoted attribute value. Stopping at the end of the NAME is
+        // the bug that leaks `href="/x"` into the extracted text.
+        let mut end = j;
+        let mut quote: Option<char> = None;
+        while end < bytes.len() {
+            let c = bytes[end];
+            match quote {
+                Some(q) if c == q => quote = None,
+                Some(_) => {}
+                None if c == '"' || c == '\'' => quote = Some(c),
+                None if c == '>' => break,
+                None => {}
+            }
+            end += 1;
+        }
+        if end >= bytes.len() {
             // No closing angle bracket: htmlparser2 would keep this as text.
             if skip_depth == 0 {
                 text.extend(bytes[i..].iter().copied());
             }
             break;
         }
-        let name: String = bytes[name_start..j].iter().collect::<String>().to_lowercase();
-        let self_closing = bytes[..j].iter().rev().find(|c| !c.is_whitespace()) == Some(&'/');
+        // A self-closing tag is decided by the last thing before `>`, not by
+        // the character before the name: `<embed/>` must not open a region.
+        let self_closing = bytes[..end].iter().rev().find(|c| !c.is_whitespace()) == Some(&'/');
+        i = end + 1;
         if closing {
             if skip_depth > 0 {
                 skip_depth -= 1;
@@ -287,7 +307,6 @@ pub fn extract_text_from_html(html: &str) -> String {
         } else if !self_closing && (skip_depth > 0 || SKIPPED_TAGS.contains(&name.as_str())) {
             skip_depth += 1;
         }
-        i = j + 1;
     }
     text.trim().to_string()
 }
@@ -466,6 +485,21 @@ mod tests {
     #[test]
     fn attributes_do_not_leak_into_the_text() {
         assert_eq!(extract_text_from_html("<a href=\"/x\" title=\"t\">link</a>"), "link");
+        assert_eq!(extract_text_from_html("<p class=\"a b\">t</p>"), "t");
+    }
+
+    #[test]
+    fn a_greater_than_inside_an_attribute_does_not_end_the_tag() {
+        assert_eq!(
+            extract_text_from_html("<a title=\"a>b\">t</a>"),
+            "t",
+            "the quoted value is part of the tag, not text"
+        );
+    }
+
+    #[test]
+    fn a_single_quoted_attribute_works_too() {
+        assert_eq!(extract_text_from_html("<a href='/x'>t</a>"), "t");
     }
 
     #[test]

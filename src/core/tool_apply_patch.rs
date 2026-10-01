@@ -32,6 +32,9 @@ pub const NAME: &str = "apply_patch";
 /// `ApplyPatchTool.Input`.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Input {
+    /// The wire name is `patchText`; the Rust name is snake_case. Without the
+    /// rename this serialises as `patch_text`, which no model ever sends.
+    #[serde(rename = "patchText")]
     pub patch_text: String,
 }
 
