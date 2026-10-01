@@ -224,6 +224,34 @@ fn sha256_digest(entree: &[u8]) -> [u8; 32] {
 mod tests {
     use super::{fast, sha256};
 
+    /// TEMPORARY DIAGNOSTIC -- a supprimer apres identification.
+    ///
+    /// Le code de `sha1_digest` est textuellement le SHA-1 canonique, et une
+    /// transliteration fidele donne le condensat correct. Le runner renvoie
+    /// pourtant 3485e413... pour l'entree vide. Ce test imprime donc l'etat
+    /// intermediaire pour voir OU les deux divergent. Il PANIQUE volontairement,
+    /// parce que la CI n'affiche la sortie que d'un test en echec.
+    #[test]
+    fn diagnostic_etat_intermediaire_du_sha1() {
+        let padded = completer(b"");
+        let padded_hex: String = padded
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect::<Vec<_>>()
+            .join("");
+        let digest = vers_hex(&sha1_digest(b""));
+        let reference = "da39a3ee5e6b4b0d3255bfef95601890afd80709";
+        panic!(
+            "longueur_remplie={} remplissage={} digest={} reference={} egal={}\nBLOCKS: {}",
+            padded.len(),
+            padded_hex,
+            digest,
+            reference,
+            digest == reference,
+            padded.chunks_exact(64).count(),
+        );
+    }
+
     // Message de 56 octets, choisi pour tomber juste avant une frontiere de
     // bloc et forcer le remplissage a repasser sur un second bloc.
     const MESSAGE_LONG: &str = "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq";

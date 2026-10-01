@@ -449,7 +449,11 @@ mod tests {
         assert!(is_transient_message("NETWORK REQUEST FAILED"));
         assert!(is_transient_message("EconnReset"));
         assert!(is_transient_message("Socket Hang Up"));
-        assert!(is_transient_message("FETCH FAILED"));
+        // Le marqueur est `failed to fetch`, dans cet ordre. "fetch failed" est
+        // l'inversion, et ne contient donc AUCUN des huit marqueurs : c'est la
+        // source qui le refuse, pas un defaut du port.
+        assert!(is_transient_message("FAILED TO FETCH"));
+        assert!(!is_transient_message("FETCH FAILED"));
     }
 
     #[test]
