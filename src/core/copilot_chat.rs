@@ -547,13 +547,42 @@ pub fn convertir_fin(brute: Option<&str>) -> (FinUnifie, Option<String>) {
 // Usage genere (parties pures de `doGenerate` et du `flush`)
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// `usage.inputTokens` of the TS `doGenerate` return value.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct EntreesGenerees {
+    #[serde(rename = "total", skip_serializing_if = "Option::is_none")]
+    pub total: Option<i64>,
+    #[serde(rename = "noCache", skip_serializing_if = "Option::is_none")]
+    pub no_cache: Option<i64>,
+    #[serde(rename = "cacheRead", skip_serializing_if = "Option::is_none")]
+    pub cache_read: Option<i64>,
+    #[serde(rename = "cacheWrite", skip_serializing_if = "Option::is_none")]
+    pub cache_write: Option<i64>,
+}
+
+/// `usage.outputTokens` of the TS `doGenerate` return value.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct SortiesGenerees {
+    #[serde(rename = "total", skip_serializing_if = "Option::is_none")]
+    pub total: Option<i64>,
+    #[serde(rename = "text", skip_serializing_if = "Option::is_none")]
+    pub text: Option<i64>,
+    #[serde(rename = "reasoning", skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<i64>,
+}
+
+/// The `usage` block the TS returns, nested exactly like it.
+///
+/// It used to be a flat struct with French field names, deriving Serialize:
+/// harmless while nothing serialised it, a wire bug the moment the response
+/// boundary is wired up. Names and nesting now match the TS, so the mapping is
+/// a plain `serde_json::to_value` instead of a hand-written translation.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct UsageGenere {
-    pub entree_total: Option<i64>,
-    pub entree_sans_cache: Option<i64>,
-    pub entree_cache_lecture: Option<i64>,
-    pub sortie_total: Option<i64>,
-    pub sortie_raisonnement: Option<i64>,
+    #[serde(rename = "inputTokens")]
+    pub input_tokens: EntreesGenerees,
+    #[serde(rename = "outputTokens")]
+    pub output_tokens: SortiesGenerees,
 }
 
 /// `noCache = total - cached` seulement quand les deux sont connus.
@@ -568,22 +597,22 @@ pub fn calculer_sans_cache(prompt_tokens: Option<i64>, cached_tokens: Option<i64
 /// Usage non flux : lecture directe, `noCache` reste indefini.
 pub fn usage_non_flux(usage: Option<&UsageTokens>) -> UsageGenere {
     match usage {
-        None => UsageGenere {
-            entree_total: None,
-            entree_sans_cache: None,
-            entree_cache_lecture: None,
-            sortie_total: None,
-            sortie_raisonnement: None,
-        },
+        None => UsageGenere::default(),
         Some(u) => UsageGenere {
-            entree_total: u.prompt_tokens,
-            entree_sans_cache: None,
-            entree_cache_lecture: u.prompt_tokens_details.as_ref().and_then(|d| d.cached_tokens),
-            sortie_total: u.completion_tokens,
-            sortie_raisonnement: u
-                .completion_tokens_details
-                .as_ref()
-                .and_then(|d| d.reasoning_tokens),
+            input_tokens: EntreesGenerees {
+                total: u.prompt_tokens,
+                no_cache: None,
+                cache_read: u.prompt_tokens_details.as_ref().and_then(|d| d.cached_tokens),
+                cache_write: None,
+            },
+            output_tokens: SortiesGenerees {
+                total: u.completion_tokens,
+                text: None,
+                reasoning: u
+                    .completion_tokens_details
+                    .as_ref()
+                    .and_then(|d| d.reasoning_tokens),
+            },
         },
     }
 }
@@ -634,11 +663,17 @@ impl AccumulateurUsage {
 
     pub fn vers_usage_genere(&self) -> UsageGenere {
         UsageGenere {
-            entree_total: self.prompt_tokens,
-            entree_sans_cache: calculer_sans_cache(self.prompt_tokens, self.cached_tokens),
-            entree_cache_lecture: self.cached_tokens,
-            sortie_total: self.completion_tokens,
-            sortie_raisonnement: self.reasoning_tokens,
+            input_tokens: EntreesGenerees {
+                total: self.prompt_tokens,
+                no_cache: calculer_sans_cache(self.prompt_tokens, self.cached_tokens),
+                cache_read: self.cached_tokens,
+                cache_write: None,
+            },
+            output_tokens: SortiesGenerees {
+                total: self.completion_tokens,
+                text: None,
+                reasoning: self.reasoning_tokens,
+            },
         }
     }
 }
@@ -951,10 +986,35 @@ mod tests {
             completion_tokens_details: None,
         }));
         let u = acc.vers_usage_genere();
-        assert_eq!(u.entree_total, Some(110));
-        assert_eq!(u.entree_cache_lecture, Some(30));
-        assert_eq!(u.entree_sans_cache, Some(80));
-        assert_eq!(u.sortie_raisonnement, Some(5));
+        assert_eq!(u.input_tokens.total, Some(110));
+        assert_eq!(u.input_tokens.cache_read, Some(30));
+        assert_eq!(u.input_tokens.no_cache, Some(80));
+        assert_eq!(u.output_tokens.reasoning, Some(5));
+    }
+
+    #[test]
+    fn l_usage_genere_s_ecrit_en_arbre_comme_le_ts() {
+        // The TS returns { inputTokens: { total, noCache, cacheRead, cacheWrite },
+        // outputTokens: { total, text, reasoning } }: nested, camelCase, and an
+        // absent field disappears instead of turning into null.
+        let acc = AccumulateurUsage {
+            prompt_tokens: Some(10),
+            completion_tokens: Some(4),
+            cached_tokens: Some(3),
+            reasoning_tokens: Some(1),
+            ..AccumulateurUsage::default()
+        };
+        let v = serde_json::to_value(acc.vers_usage_genere()).unwrap();
+        assert_eq!(v["inputTokens"]["total"], json!(10));
+        assert_eq!(v["inputTokens"]["cacheRead"], json!(3));
+        assert_eq!(v["inputTokens"]["noCache"], json!(7));
+        assert!(v["inputTokens"].get("cacheWrite").is_none());
+        assert_eq!(v["outputTokens"]["total"], json!(4));
+        assert_eq!(v["outputTokens"]["reasoning"], json!(1));
+        assert!(v["outputTokens"].get("text").is_none());
+        // No French name may survive on the wire.
+        assert!(v.get("entree_total").is_none());
+        assert!(v.get("sortie_total").is_none());
     }
 
     #[test]

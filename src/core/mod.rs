@@ -7,6 +7,9 @@ pub mod run;
 pub mod session;
 
 pub mod command;
+pub mod config_agent;
+pub mod config_mcp;
+pub mod config_provider;
 pub mod copilot_chat;
 pub mod copilot_responses;
 pub mod credential;

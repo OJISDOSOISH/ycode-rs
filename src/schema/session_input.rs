@@ -22,6 +22,7 @@ pub type SessionId = String;
 /// `SessionInput.Admitted`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Admitted {
+    #[serde(rename = "admittedSeq")]
     pub admitted_seq: i64,
     pub id: MessageId,
     #[serde(rename = "sessionID")]
