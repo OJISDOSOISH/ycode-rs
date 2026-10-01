@@ -424,30 +424,68 @@ mod tests {
         let counter_clone = counter.clone();
         let wake_count = Arc::new(AtomicUsize::new(0));
         let wake_count_clone = wake_count.clone();
+        let start_barrier = Arc::new((Mutex::new(false), Condvar::new()));
+        let start_barrier_clone = start_barrier.clone();
+        let continue_barrier = Arc::new((Mutex::new(false), Condvar::new()));
+        let continue_barrier_clone = continue_barrier.clone();
+        let second_barrier = Arc::new((Mutex::new(false), Condvar::new()));
+        let second_barrier_clone = second_barrier.clone();
 
-        let coord = Coordinator::new(move |_key: u32, force: bool| -> Result<(), TestError> {
-            if !force {
+        // Un seul coordinateur (comme le TS) : le wake et le run lisent la meme
+        // map, sinon le wake est un no-op et la coalescence n'a pas lieu.
+        let coord = Arc::new(Coordinator::new(move |_key: u32, force: bool| -> Result<(), TestError> {
+            if force {
+                // Premiere execution : signaler le demarrage, puis attendre
+                // (garde anti-pendaison).
+                {
+                    let (lock, cvar) = &*start_barrier_clone;
+                    *lock.lock().unwrap() = true;
+                    cvar.notify_one();
+                }
+                attendre_flag(&continue_barrier_clone, "liberation de l'execution");
+            } else {
+                // Successeur : signaler sa fin (garde anti-pendaison).
+                {
+                    let (lock, cvar) = &*second_barrier_clone;
+                    *lock.lock().unwrap() = true;
+                    cvar.notify_one();
+                }
                 wake_count_clone.fetch_add(1, Ordering::SeqCst);
             }
             counter_clone.fetch_add(1, Ordering::SeqCst);
             Ok(())
+        }));
+
+        // Demarrer l'execution dans un thread, sur le meme coordinateur.
+        let coord_thread = coord.clone();
+        let handle = thread::spawn(move || {
+            coord_thread.run(1).unwrap();
         });
 
-        // Demarrer une execution.
-        coord.run(1).unwrap();
-        assert_eq!(counter.load(Ordering::SeqCst), 1);
-        assert_eq!(wake_count.load(Ordering::SeqCst), 0);
+        // Attendre que l'execution commence (garde anti-pendaison).
+        attendre_flag(&start_barrier, "demarrage de l'execution");
 
-        // Envoyer plusieurs wakes pendant qu'aucune execution n'est active
-        // (l'execution precedente est terminee).
+        // Envoyer plusieurs wakes PENDANT l'execution : ils doivent être
+        // coalesces en un seul successeur (comme le TS, "coalesces wakes
+        // received during active execution").
         coord.wake(1);
         coord.wake(1);
         coord.wake(1);
 
-        // Attendre que le successeur se termine.
-        thread::sleep(Duration::from_millis(100));
+        // Liberer l'execution.
+        {
+            let (lock, cvar) = &*continue_barrier;
+            let mut cont = lock.lock().unwrap();
+            *cont = true;
+            cvar.notify_one();
+        }
 
-        // Un seul successeur doit avoir ete execute (coalescence).
+        // Attendre que le successeur se termine (garde anti-pendaison).
+        attendre_flag(&second_barrier, "fin du successeur");
+
+        handle.join().unwrap();
+
+        // Deux executions : l'originale + un seul successeur coalesce.
         assert_eq!(counter.load(Ordering::SeqCst), 2);
         assert_eq!(wake_count.load(Ordering::SeqCst), 1);
     }
