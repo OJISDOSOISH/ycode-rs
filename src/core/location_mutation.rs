@@ -306,8 +306,19 @@ mod tests {
         ResolvedPath { canonical: canonical.to_string(), kind: Some(kind), directory }
     }
 
+    /// Resolves an input path the way the real service would, i.e. against the
+    /// Location directory first, so the `canonical` handed to `resolve` is
+    /// absolute. Passing the raw input as `canonical` would make every internal
+    /// case look like a symlink out of the Location, because a relative
+    /// canonical path is not contained by an absolute root.
     fn resolve_path(path: &str) -> Result<Target, PathError> {
-        resolve(&ResolveInput { path: path.into(), kind: None }, LOCATION, ROOT, &resolved(path, NodeKind::File))
+        let absolute = resolve_against(LOCATION, path);
+        resolve(
+            &ResolveInput { path: path.into(), kind: None },
+            LOCATION,
+            ROOT,
+            &resolved(&absolute, NodeKind::File),
+        )
     }
 
     // --- the escapes ---
@@ -363,7 +374,7 @@ mod tests {
         let target = resolve_path("src/a.ts").unwrap();
         assert_eq!(target.resource, "src/a.ts");
         assert!(target.external_directory.is_none());
-        assert_eq!(target.canonical, "/work/project/src/a.ts");
+        assert_eq!(target.canonical, "/work/project/src/a.ts", "the canonical path is absolute");
     }
 
     #[test]
