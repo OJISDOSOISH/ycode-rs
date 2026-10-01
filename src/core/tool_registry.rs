@@ -169,7 +169,6 @@ pub fn wholly_disabled(action: &str, rules: &Ruleset) -> bool {
         None => false,
     }
 }
-}
 
 #[cfg(test)]
 mod tests {
