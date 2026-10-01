@@ -366,14 +366,14 @@ mod tests {
 
     #[test]
     fn a_transform_sees_what_the_previous_one_left() {
-        let seen = std::sync::Mutex::new(Vec::<usize>::new());
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<usize>::new()));
         let s = Store::new(without_finalize(Vec::new));
-        let seen_a = &seen;
+        let seen_a = seen.clone();
         s.transform(Box::new(move |state: &mut Lines| {
             seen_a.lock().unwrap().push(state.len());
             state.push("a".to_string());
         }));
-        let seen_b = &seen;
+        let seen_b = seen.clone();
         s.transform(Box::new(move |state: &mut Lines| {
             seen_b.lock().unwrap().push(state.len());
             state.push("b".to_string());
@@ -395,8 +395,8 @@ mod tests {
 
     #[test]
     fn the_finalizer_runs_after_the_transforms_and_before_publication() {
-        let order = std::sync::Mutex::new(Vec::<&'static str>::new());
-        let order_finalize = &order;
+        let order = std::sync::Arc::new(std::sync::Mutex::new(Vec::<&'static str>::new()));
+        let order_finalize = order.clone();
         let s = Store::new(Options {
             initial: Box::new(Vec::new),
             finalize: Some(Box::new(move |value: &Lines| {
@@ -404,7 +404,7 @@ mod tests {
                 assert_eq!(value.len(), 1, "the finalizer sees the transforms' output");
             })),
         });
-        let order_transform = &order;
+        let order_transform = order.clone();
         s.transform(Box::new(move |state: &mut Lines| {
             order_transform.lock().unwrap().push("transform");
             state.push("a".to_string());
@@ -475,8 +475,8 @@ mod tests {
     #[test]
     fn inside_a_batch_nothing_is_published_until_the_batch_closes() {
         let s = store();
-        let observed = std::sync::Mutex::new(Vec::<Vec<String>>::new());
-        let seen = &observed;
+        let observed = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Vec<String>>::new()));
+        let seen = observed.clone();
         let outcome = batch(|| {
             push(&s, "a");
             seen.lock().unwrap().push(s.get().unwrap());
@@ -519,8 +519,7 @@ mod tests {
 
     #[test]
     fn a_nested_batch_does_not_open_a_second_queue() {
-        let seen = std::sync::Mutex::new(Vec::<bool>::new());
-        let depths = &seen;
+        let depths = std::sync::Arc::new(std::sync::Mutex::new(Vec::<bool>::new()));
         let outcome = batch(|| {
             depths.lock().unwrap().push(in_batch());
             let inner = batch(|| {
