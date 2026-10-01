@@ -34,6 +34,10 @@
 //! `ToolResult` return type is a plain string by design, and it is re-exported
 //! here under its original names so callers outside the cluster are unaffected.
 //!
+//! Its module name is `toolbox`, not `box`: `box` is a reserved keyword in Rust
+//! 2021 and the file is a module declaration away from being a hard error. The
+//! `#[path]` attribute keeps the file named `box.rs`.
+//!
 //! Two conventions inside the cluster. A tool's NAME constant is the string a
 //! model sends back, so a typo there does not fail a build - it fails at
 //! runtime as an unknown tool; `builtins.rs` checks every name against the
@@ -45,7 +49,8 @@
 
 pub mod apply_patch;
 pub mod bash;
-pub mod box;
+#[path = "box.rs"]
+pub mod toolbox;
 pub mod builtins;
 pub mod edit;
 pub mod glob;
@@ -64,4 +69,4 @@ pub mod write;
 
 // The V1 runner's surface, re-exported unchanged so that moving it into this
 // directory is invisible from outside.
-pub use box::{ToolBox, ToolResult, Workspace};
+pub use toolbox::{ToolBox, ToolResult, Workspace};
