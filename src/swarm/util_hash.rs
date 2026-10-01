@@ -136,6 +136,15 @@ fn sha1_digest(entree: &[u8]) -> [u8; 20] {
     for (i, mot) in h.iter().enumerate() {
         sortie[4 * i..4 * i + 4].copy_from_slice(&mot.to_be_bytes());
     }
+    // TEMPORARY DIAGNOSTIC -- retirer avec le test homonyme.
+    #[cfg(test)]
+    if entree.is_empty() {
+        eprintln!(
+            "DIAG blocs={} w0={:08x} w1={:08x} w16={:08x} w79={:08x} h={:08x}{:08x}{:08x}{:08x}{:08x}",
+            donnees.chunks_exact(64).count(),
+            w[0], w[1], w[16], w[79], h[0], h[1], h[2], h[3], h[4]
+        );
+    }
     sortie
 }
 

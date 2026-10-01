@@ -666,6 +666,13 @@ mod tests {
         empty_info("acme", id)
     }
 
+    /// A `native` model that names its own provider, so a test can tell two
+    /// records apart. `native` hard-codes `"acme"`, which would make every key
+    /// identical and hide the ordering the caller is trying to observe.
+    fn native_for(provider_id: &str, id: &str) -> ModelInfo {
+        empty_info(provider_id, id)
+    }
+
     /// An `aisdk` model with a chosen package and a chosen `api.id`.
     fn aisdk(model_id: &str, api_id: &str, package: &str) -> ModelInfo {
         let mut info = native(model_id);
@@ -776,10 +783,11 @@ mod tests {
         let generated = generate(&info);
         assert_eq!(ids_of(&generated), ["high", "max"]);
 
-        // Without the `toLowerCase`, the uppercase id would not contain any
-        // marker. The lowercasing is applied to the whole haystack, so both
-        // halves are covered.
-        let info = glm("GLM5P2");
+        // The marker is `glm-5p2`, hyphen included. "GLM5P2" has no hyphen, so
+        // it cannot contain it and `generate` returns nothing -- which is the
+        // correct answer, not a missing lowercasing. The uppercase half below is
+        // what proves the lowercasing happened.
+        let info = glm("GLM-5P2");
         assert_eq!(generate(&info).len(), 2);
     }
 
@@ -1230,9 +1238,17 @@ mod tests {
         // A `BTreeMap` of providers would sort them and change the order of the
         // `update` calls, which the returned key list exposes.
         let mut catalog = Catalog::new();
-        catalog.push_record("zeta", vec![native("z1"), native("z2")]);
-        catalog.push_record("alpha", vec![native("a1")]);
-        catalog.push_record("mid", vec![native("m1")]);
+        // The provider id of a key comes from the MODEL, never from the record
+        // key: `catalog.model.update(model.providerID, model.id, ...)`. So each
+        // model names its own provider here, otherwise all four keys would
+        // carry the same provider and the assertion could not fail whatever
+        // order the walk used.
+        catalog.push_record(
+            "zeta",
+            vec![native_for("zeta", "z1"), native_for("zeta", "z2")],
+        );
+        catalog.push_record("alpha", vec![native_for("alpha", "a1")]);
+        catalog.push_record("mid", vec![native_for("mid", "m1")]);
 
         let keys = catalog.model_keys();
         assert_eq!(
@@ -1272,12 +1288,18 @@ mod tests {
         let info = glm("glm-5.2");
         let first = generate(&info);
         let second = generate(&info);
+        // Purity means the two calls are EQUAL, so `assert_ne!` here would
+        // contradict the line above. Independence is not about the values
+        // differing, it is about the two results not sharing storage: mutate one
+        // and the other must not move. That is what the rest of the test does.
         assert_eq!(first, second);
-        assert_ne!(first, second, "two calls must not share one allocation");
 
-        // Mutating the result does not touch the model, and vice versa.
         let mut mutated = generate(&info);
         mutated[0].body.insert("x".to_string(), json!(1));
+        assert!(
+            first[0].body.is_empty(),
+            "the second call's result was written through"
+        );
         assert!(info.variants.is_empty());
         assert!(!first[0].body.contains_key("x"));
     }
