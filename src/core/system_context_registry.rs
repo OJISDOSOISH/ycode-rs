@@ -13,10 +13,8 @@
 
 use serde::{Deserialize, Serialize};
 
-/// `Key` from the source: a namespaced string `"[a-z0-9.-]*/[a-z0-9._/-]*"`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct Key(pub String);
+/// Canonical re-export of `Key`, owned by `system_context.rs` per the source.
+pub use super::system_context::Key;
 
 /// `Entry` from the source: one registered context source.
 ///

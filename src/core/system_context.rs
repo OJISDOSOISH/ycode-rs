@@ -97,7 +97,7 @@ pub enum ReplacementResult {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "_tag")]
 pub enum ReconcileResult {
-        #[serde(rename = "Unchanged")]
+    #[serde(rename = "Unchanged")]
     Unchanged,
     #[serde(rename = "Updated")]
     Updated(Updated),

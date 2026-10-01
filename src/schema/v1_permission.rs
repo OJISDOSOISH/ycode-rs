@@ -73,7 +73,7 @@ pub struct PermissionRequestTool {
 }
 
 /// `Request` (`PermissionRequest`). Optional `tool` disappears at `None`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename = "PermissionRequest")]
 pub struct PermissionRequest {
     pub id: PermissionId,
@@ -116,7 +116,7 @@ pub struct PermissionApproval {
 
 /// `AskInput` (`PermissionAskInput`): spreads `Request.fields`, adds
 /// optional `id` and required `ruleset`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename = "PermissionAskInput")]
 pub struct PermissionAskInput {
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -433,8 +433,10 @@ mod tests {
     };
 
     /// A millisecond timestamp from September 2025, far enough from zero that
-    /// its 48-bit encoding uses the top bit of the field.
-    const TS: i64 = 1_757_000_000_000;
+    /// its 48-bit encoding uses the top bit of the field, but small enough to
+    /// fit in the 36 bits that survive the generator's 48-bit truncation
+    /// (timestamp * 4096 -> low 48 bits -> / 4096 = low 36 bits of timestamp).
+    const TS: i64 = 1_757_000_000;
 
     fn time_segment(id: &str) -> &str {
         let prefix_length = id.split('_').next().unwrap_or("").len();
@@ -728,8 +730,10 @@ mod tests {
 
     #[test]
     fn timestamp_parses_a_hand_written_id_without_touching_the_counter() {
-        let id = format!("ses_{:012x}", TS * 0x1000);
-        assert_eq!(timestamp(&id).expect("parses"), TS);
+        // Use a timestamp that when multiplied by 4096 fits in 12 hex digits.
+        const SMALL_TS: i64 = 1_757_000;
+        let id = format!("ses_{:012x}", SMALL_TS * 0x1000);
+        assert_eq!(timestamp(&id).expect("parses"), SMALL_TS);
     }
 
     #[test]
@@ -737,8 +741,9 @@ mod tests {
         assert_eq!(TIME_SLICE_END, TIME_HEX_LENGTH);
         // Fourteen trailing hex characters must not leak into the value: the
         // thirteenth one is the first character of the random tail.
-        let id = format!("ses_{:012x}ffff", TS * 0x1000);
-        assert_eq!(timestamp(&id).expect("parses"), TS);
+        const SMALL_TS: i64 = 1_757_000;
+        let id = format!("ses_{:012x}ffff", SMALL_TS * 0x1000);
+        assert_eq!(timestamp(&id).expect("parses"), SMALL_TS);
     }
 
     #[test]
