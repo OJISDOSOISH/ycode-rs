@@ -134,18 +134,23 @@ pub fn create_at(descending_order: bool, timestamp: i64) -> String {
 /// - `random` est la liste des octets aleatoires, convertis en caracteres.
 fn compose(descending_order: bool, timestamp: i64, counter: i64, random: &[u8]) -> String {
     let current = (timestamp as i128) * BASE + counter as i128;
-    // `!current` sur un entier signe vaut exactement `-current - 1`, comme
-    // l'operateur `~` de `BigInt`.
-    let value = if descending_order { !current } else { current };
+    // The source treats the 56-bit value as unsigned for hex formatting.
+    // For ascending: current (positive). For descending: ~current (two's complement).
+    // Mask to 56 bits to match TypeScript's BigInt behavior where only the low
+    // 56 bits are used for the time segment (12 hex chars = 48 bits, but the
+    // full value is 56 bits to cover the ~2.2 year window).
+    const MASK_56: i128 = (1i128 << 56) - 1;
+    let value_u56 = if descending_order {
+        (!current) & MASK_56
+    } else {
+        current & MASK_56
+    };
+    // Format as 14 hex chars (56 bits), take the high 48 bits (first 12 chars).
+    let hex = format!("{:014x}", value_u56);
+    let time_hex = &hex[..12];
 
     let mut out = String::with_capacity(TIME_LENGTH + random.len());
-    for index in 0..6i32 {
-        let shift = 40 - 8 * index;
-        // Le masquage se fait sur l'entier signe, pas sur un octet, sinon une
-        // valeur negative ne donnerait pas les memes bits qu'en JavaScript.
-        let octet = ((value >> shift) & 0xff) as u8;
-        out.push_str(&format!("{:02x}", octet));
-    }
+    out.push_str(time_hex);
     for &octet in random {
         out.push(CHARS[(octet % 62) as usize] as char);
     }
