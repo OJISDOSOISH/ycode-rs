@@ -20,6 +20,7 @@
 
 
 
+
 pub mod command;
 pub mod config_agent;
 pub mod config_mcp;
@@ -45,6 +46,7 @@ pub mod open;
 pub mod permission_saved;
 pub mod process;
 pub mod provider;
+pub mod repository;
 pub mod ripgrep;
 pub mod run;
 pub mod session;
