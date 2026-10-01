@@ -24,6 +24,7 @@
 
 
 
+
 pub mod command;
 pub mod config_agent;
 pub mod config_mcp;
@@ -43,6 +44,7 @@ pub mod git;
 pub mod global;
 pub mod image;
 pub mod integration;
+pub mod location_mutation;
 pub mod model;
 pub mod observability_logging;
 pub mod observability_otlp;
