@@ -74,8 +74,12 @@
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
 
-use serde::de::{Deserialize, Deserializer, MapAccess, Visitor};
-use serde::ser::Serialize;
+use serde::de::{Deserializer, MapAccess, Visitor};
+// The derive macros live at the crate root, which serde re-exports from
+// serde_derive; `serde::de::Deserialize` is the TRAIT only. Importing the two
+// by module path brings the traits into scope and leaves every `#[derive]`
+// on this file unresolved. 163 modules of this crate import from the root.
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::core::model::{
@@ -139,7 +143,7 @@ pub struct CoutModelsDev {
     pub tiers: Option<Vec<PalierCoutModelsDev>>,
     /// Surcharge tarifaire au-dela de 200k de contexte.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub context_over_200k: Option<CoutModelsDev>,
+    pub context_over_200k: Option<Box<CoutModelsDev>>,
 }
 
 /// Palier tarifaire : un cout portant son propre `tier{type,size}`.

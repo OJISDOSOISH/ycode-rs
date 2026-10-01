@@ -149,28 +149,17 @@ pub trait HoteEffet: Send + Sync {
 
 /// Construit un domaine + reload à partir d'un `&dyn Domaine` de l'hôte.
 fn domaine_et_reload(d: &dyn Domaine) -> DomaineEtReload {
-    // Chaque appel de `transforme`/`recharge` doit pouvoir vivre au-delà de
-    // l'appel (futurs 'static) : on passe par un Arc cloné à la volée.
-    struct VueDomaine(Arc<dyn Domaine>);
-    impl Domaine for VueDomaine {
-        fn transforme<'a>(&'a self, rappel: RappelRedaction) -> BoiteFutur<'a, Enregistrement> {
-            let domaine = Arc::clone(&self.0);
-            Box::pin(async move { domaine.transforme(rappel).await })
-        }
-        fn recharge(&self) -> FuturPossede<()> {
-            self.0.recharge()
-        }
-    }
-    // Le TS n'a pas besoin de posséder le domaine : on re-wrape via une closure
-    // d'emprunt pour éviter une allocation Arc supplémentaire par domaine.
+    // `EmpruntDomaine` already implements `Domaine`, so it coerces into the
+    // `Arc<dyn Domaine>` this field holds on its own. The `ViaHote` literal that
+    // used to sit here had two named fields, so it matched neither this
+    // struct's single `transformation` field nor the TS, where
+    // `HostRegistration` has exactly one field (`dispose`).
     DomaineEtReload {
-        transformation: Arc::new(ViaHote {
-            transforme: {
-                let ptr = d as *const dyn Domaine;
-                // Sûr : l'hôte vit plus longtemps que le contexte transmis au setup.
-                unsafe { Arc::new(EmpruntDomaine { ptr }) }
-            },
-        }),
+        transformation: {
+            let ptr = d as *const dyn Domaine;
+            // Sûr : l'hôte vit plus longtemps que le contexte transmis au setup.
+            unsafe { Arc::new(EmpruntDomaine { ptr }) }
+        },
     }
 }
 
