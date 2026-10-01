@@ -62,23 +62,28 @@ pub trait ConnexionIntegration: Send + Sync {
 }
 
 /// Miroir de `PluginContext` : le contexte remis au `setup` d'un plugin Promise.
-pub struct ContextePlugin {
+///
+/// Le paramètre de durée de vie est la reprise du `context` du TypeScript : tout
+/// ici est emprunté à l'hôte pendant l'appel du `setup`, et rien ne survit
+/// après. Sans lui, chaque `Arc<dyn ...>` ci-dessous vaudrait `'static`, ce
+/// qu'aucun emprunt depuis `&dyn HoteEffet` ne peut satisfaire.
+pub struct ContextePlugin<'a> {
     pub options: Arc<dyn Any + Send + Sync>,
-    pub agent: DomaineEtReload,
-    pub aisdk: Aisdk,
-    pub catalogue: DomaineEtReload,
-    pub commande: DomaineEtReload,
-    pub integration: Integration,
-    pub plugin: GestionPlugins,
-    pub reference: DomaineEtReload,
-    pub competence: DomaineEtReload,
+    pub agent: DomaineEtReload<'a>,
+    pub aisdk: Aisdk<'a>,
+    pub catalogue: DomaineEtReload<'a>,
+    pub commande: DomaineEtReload<'a>,
+    pub integration: Integration<'a>,
+    pub plugin: GestionPlugins<'a>,
+    pub reference: DomaineEtReload<'a>,
+    pub competence: DomaineEtReload<'a>,
 }
 
-pub struct DomaineEtReload {
-    pub transformation: Arc<dyn Domaine>,
+pub struct DomaineEtReload<'a> {
+    pub transformation: Arc<dyn Domaine + 'a>,
 }
 
-impl DomaineEtReload {
+impl<'a> DomaineEtReload<'a> {
     /// Équivalent de `transform(domaine)` du TS : enregistre et résout à l'inscription.
     pub fn transforme(&self, rappel: RappelRedaction) -> FuturPossede<Enregistrement> {
         let domaine = Arc::clone(&self.transformation);
@@ -90,20 +95,20 @@ impl DomaineEtReload {
     }
 }
 
-pub struct Aisdk {
-    pub sdk: Arc<dyn Fn(RappelEvenement) -> FuturPossede<Enregistrement> + Send + Sync>,
-    pub language: Arc<dyn Fn(RappelEvenement) -> FuturPossede<Enregistrement> + Send + Sync>,
+pub struct Aisdk<'a> {
+    pub sdk: Arc<dyn Fn(RappelEvenement) -> FuturPossede<Enregistrement> + Send + Sync + 'a>,
+    pub language: Arc<dyn Fn(RappelEvenement) -> FuturPossede<Enregistrement> + Send + Sync + 'a>,
 }
 
-pub struct Integration {
-    pub transformation: DomaineEtReload,
+pub struct Integration<'a> {
+    pub transformation: DomaineEtReload<'a>,
     /// Owned, like the other six fields: the host holds its connection behind an
     /// `Arc` and hands a clone out. A borrow would tie this struct to the
     /// lifetime of `&self` on the host, which is not `'static`.
     pub connexion: Arc<dyn ConnexionIntegration>,
 }
 
-impl Integration {
+impl<'a> Integration<'a> {
     pub fn transforme(&self, rappel: RappelRedaction) -> FuturPossede<Enregistrement> {
         self.transformation.transforme(rappel)
     }
@@ -113,16 +118,16 @@ impl Integration {
     }
 }
 
-pub struct GestionPlugins {
+pub struct GestionPlugins<'a> {
     /// Ajoute un sous-plugin ; il est lui-même adapté via `depuis_promesse`.
-    pub ajoute: Arc<dyn Fn(Arc<dyn PluginPromesse>) -> FuturPossede<()> + Send + Sync>,
-    pub supprime: Arc<dyn Fn(&str) -> FuturPossede<()> + Send + Sync>,
+    pub ajoute: Arc<dyn Fn(Arc<dyn PluginPromesse>) -> FuturPossede<()> + Send + Sync + 'a>,
+    pub supprime: Arc<dyn Fn(&str) -> FuturPossede<()> + Send + Sync + 'a>,
 }
 
 /// Plugin côté « Promise » : id + installation asynchrone (`Plugin` du TS).
 pub trait PluginPromesse: Send + Sync {
     fn id(&self) -> &str;
-    fn installation(&self, contexte: ContextePlugin) -> FuturPossede<()>;
+    fn installation(&self, contexte: ContextePlugin<'_>) -> FuturPossede<()>;
 }
 
 /// Plugin côté « Effect » : ce que consomme le chargeur (`define` du TS).
@@ -151,7 +156,7 @@ pub trait HoteEffet: Send + Sync {
 }
 
 /// Construit un domaine + reload à partir d'un `&dyn Domaine` de l'hôte.
-fn domaine_et_reload(d: &dyn Domaine) -> DomaineEtReload {
+fn domaine_et_reload<'a>(d: &'a dyn Domaine) -> DomaineEtReload<'a> {
     // `EmpruntDomaine` already implements `Domaine`, so it coerces into the
     // `Arc<dyn Domaine>` this field holds on its own. The `ViaHote` literal that
     // used to sit here had two named fields, so it matched neither this
@@ -167,15 +172,15 @@ fn domaine_et_reload(d: &dyn Domaine) -> DomaineEtReload {
 }
 
 /// Vue empruntée d'un domaine de l'hôte (durée de vie couverte par le setup).
-struct EmpruntDomaine {
-    ptr: *const dyn Domaine,
+struct EmpruntDomaine<'a> {
+    ptr: *const (dyn Domaine + 'a),
 }
 // L'hôte est `Send + Sync` et survit à l'appel ; on partage le pointeur brut
 // uniquement pendant l'exécution du setup.
-unsafe impl Send for EmpruntDomaine {}
-unsafe impl Sync for EmpruntDomaine {}
+unsafe impl<'a> Send for EmpruntDomaine<'a> {}
+unsafe impl<'a> Sync for EmpruntDomaine<'a> {}
 
-impl Domaine for EmpruntDomaine {
+impl<'a> Domaine for EmpruntDomaine<'a> {
     fn transforme<'a>(&'a self, rappel: RappelRedaction) -> BoiteFutur<'a, Enregistrement> {
         let domaine: &dyn Domaine = unsafe { &*self.ptr };
         Box::pin(async move { domaine.transforme(rappel).await })
@@ -187,7 +192,7 @@ impl Domaine for EmpruntDomaine {
 }
 
 /// Construit un domaine + reload : variante publique sûre quand on possède un Arc.
-pub fn domaine_depuis_arc(d: Arc<dyn Domaine>) -> DomaineEtReload {
+pub fn domaine_depuis_arc(d: Arc<dyn Domaine>) -> DomaineEtReload<'static> {
     DomaineEtReload { transformation: d }
 }
 

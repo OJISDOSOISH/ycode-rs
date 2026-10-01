@@ -143,7 +143,10 @@ mod tests {
     #[derive(Default)]
     struct DomaineFactice {
         rappels: Mutex<Vec<usize>>,
-        recharges: Mutex<Vec<()>>,
+        /// `Arc` parce que `FuturPossede` est `'static` : un futur ne peut pas
+        /// retenir `&self.recharges`. On capture donc un clone de l'`Arc`, ce qui
+        /// laisse la recharge dans le futur au lieu de la faire d avance.
+        recharges: Arc<Mutex<Vec<()>>>,
     }
 
     impl Domaine for DomaineFactice {
@@ -155,7 +158,7 @@ mod tests {
             })
         }
         fn recharge(&self) -> FuturPossede<()> {
-            let etat = &self.recharges;
+            let etat = Arc::clone(&self.recharges);
             Box::pin(async move {
                 etat.lock().unwrap().push(());
             })
@@ -265,9 +268,15 @@ mod tests {
         let capteur = miroir.clone();
         let rappel: RappelRedaction = Arc::new(move |brouillon: &mut dyn Any| {
             let capteur = capteur.clone();
+            // `&mut dyn Any` n'est pas `Send`, et le futur le retenait, d'où
+            // « future cannot be sent between threads safely ». On lit la valeur
+            // AVANT de construire le futur, pour ne capturer qu'un `Option<u32>`,
+            // qui est `Copy` et `Send`. La sémantique est la même : si ce n'est
+            // pas un `u32`, rien n'est écrit.
+            let extrait = brouillon.downcast_mut::<u32>().map(|valeur| *valeur);
             Box::pin(async move {
-                if let Some(valeur) = brouillon.downcast_mut::<u32>() {
-                    *capteur.lock().unwrap() = *valeur;
+                if let Some(valeur) = extrait {
+                    *capteur.lock().unwrap() = valeur;
                 }
             }) as FuturPossede<()>
         });
