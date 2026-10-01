@@ -32,3 +32,5 @@ pub mod snapshot;
 pub mod websearch;
 
 pub mod process;
+
+pub mod util_error;

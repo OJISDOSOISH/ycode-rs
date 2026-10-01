@@ -125,7 +125,7 @@ pub const TIME_HEX_LENGTH: usize = 12;
 ///
 /// The source computes `id.slice(prefix.length + 1, prefix.length + 13)`, i.e.
 /// it takes twelve characters starting one past the underscore.
-const TIME_SLICE_END: usize = TIME_HEX_LENGTH + 1;
+const TIME_SLICE_END: usize = TIME_HEX_LENGTH;
 
 /// Divisor applied to the 48-bit time field, the `0x1000n` of the source.
 ///

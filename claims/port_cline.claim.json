@@ -1,0 +1,7 @@
+{
+  "owner": "cline",
+  "started": "2026-10-01T11:25:29Z",
+  "source": "packages/{schema/src/v1/permission.ts, schema/src/v1/question.ts, core/src/control-plane/move-session.ts, core/src/skill/discovery.ts, core/src/skill/guidance.ts, core/src/system-context/builtins.ts, core/src/system-context/index.ts, core/src/system-context/registry.ts, core/src/observability/logging.ts, core/src/observability/otlp.ts, core/src/permission/saved.ts}",
+  "target": "src/{schema/v1_permission.rs, schema/v1_question.rs, core/control_plane_move_session.rs, core/skill_discovery.rs, core/skill_guidance.rs, core/system_context_builtins.rs, core/system_context.rs, core/system_context_registry.rs, core/observability_logging.rs, core/observability_otlp.rs, core/permission_saved.rs}",
+  "note": "11 files ~1217 lines. Pure-logic ports only per Rule 7; Effect/Layer/service wiring documented as left out. No compile locally (Rule 1)."
+}
