@@ -463,9 +463,16 @@ fn walk_to_opaque<'a>(
         Some(choice) => choice,
         None => return (None, ExtractionDiagnosis::ChoiceNotObject),
     };
+    // `message` and `delta` are both `.nullish()` in the schema the caller
+    // validates against, and the caller reads them with optional chaining
+    // (`choice?.delta == null`, `openai-compatible-chat-language-model.ts:462`).
+    // So a present-but-null inner key is **absent**, not "present and not an
+    // object": `null` and a missing key take the same branch in JavaScript.
+    // `InnerNotObject` is reserved for a value that really is something else --
+    // a string, an array, a number.
     let inner = match choice.get(hop.name()) {
         Some(Value::Object(inner)) => inner,
-        None => return (None, ExtractionDiagnosis::InnerAbsent(hop)),
+        None | Some(Value::Null) => return (None, ExtractionDiagnosis::InnerAbsent(hop)),
         Some(_) => return (None, ExtractionDiagnosis::InnerNotObject(hop)),
     };
     match inner.get(REASONING_OPAQUE_FIELD) {
@@ -853,7 +860,10 @@ mod tests {
     /// unknown` can be handed. The extractor is total, so none may panic.
     #[test]
     fn an_empty_input_extracts_nothing_and_does_not_panic() {
-        for racine in [json!({}), json!(null), json!([]), json!(""), json!(0), json!(true)] {
+        // `json!({})` is deliberately NOT in this list: an empty object IS an object,
+// so it is diagnosed one step further in (`ChoicesAbsent`), which the second
+// half of this test asserts. Listing it here as well would contradict that.
+for racine in [json!(null), json!([]), json!(""), json!(0), json!(true)] {
             assert_eq!(
                 extractor().extract_metadata(&racine),
                 None,
@@ -1085,12 +1095,27 @@ mod tests {
         assert!(CopilotMetadataRecord::deserialize(&faux_entier).is_err());
 
         // The exact spelling, and only that one, round-trips.
-        let exact: Value = serde_json::from_str(r#"{"copilot":{"reasoningOpaque":"x"}}"#).unwrap();
+        //
+        // The record is the INNER object. The full wire shape is
+        // `{"copilot":{"reasoningOpaque":"x"}}` -- the outer `copilot` key is
+        // the provider bucket added by `copilot_metadata`, and it is NOT a field
+        // of the record. Handing the wrapper to `deserialize` would fail on the
+        // unknown key `copilot`, which says nothing about the spelling trap this
+        // test is about, so the inner object is unwrapped first.
+        let exact: Value = serde_json::from_str(r#"{"reasoningOpaque":"x"}"#).unwrap();
         let relu: CopilotMetadataRecord = CopilotMetadataRecord::deserialize(&exact).unwrap();
         assert_eq!(relu.reasoning_opaque.as_deref(), Some("x"));
         assert_eq!(
             serde_json::to_string(&relu).unwrap(),
             r#"{"reasoningOpaque":"x"}"#
+        );
+
+        // And the full wire shape does round-trip, bucket included, one level up.
+        let complet: Value = serde_json::from_str(r#"{"copilot":{"reasoningOpaque":"x"}}"#).unwrap();
+        assert_eq!(
+            complet["copilot"]["reasoningOpaque"],
+            json!("x"),
+            "the bucket is added on write, it is not a field of the record"
         );
     }
 
@@ -1401,14 +1426,31 @@ mod tests {
             format!(
                 r#"{{"extractMetadata":{{"parameterName":"parsedBody","parameter_type":"unknown","returnType":"x"}},"createStreamExtractor":{{"members":[]}}}}"#
             ),
-            // The members and the parameter name of the stream extractor.
-            r#"{"extractMetadata":{"parameterName":"parsedBody","parameterType":"unknown","returnType":"x"},"createStreamExtractor":{"members":[{"name":"process_chunk","parameters":["parsedChunk"],"returnType":"void"}]}}"#.to_string(),
-            r#"{"extractMetadata":{"parameterName":"parsedBody","parameterType":"unknown","returnType":"x"},"createStreamExtractor":{"members":[{"name":"processChunk","parameters":["parsed_chunk"],"returnType":"void"}]}}"#.to_string(),
-            r#"{"extractMetadata":{"parameterName":"parsedBody","parameterType":"unknown","returnType":"x"},"createStreamExtractor":{"members":[{"name":"build_metadata","parameters":[],"returnType":"x"}]}}"#.to_string(),
+        ];
+        // `deny_unknown_fields` locks KEYS. These three are the value half of the
+        // same trap, and serde cannot catch them: `name` is a `String` and
+        // `parameters` is a `Vec<String>`, so "process_chunk" is a perfectly
+        // valid value. They are asserted as ACCEPTED below, next to
+        // `parameterName: "parsed_body"`, because holding them here would
+        // contradict that block -- two `String` fields in the same position
+        // cannot behave differently.
+        let valeurs_fausses_ridees = vec![
+            r#"{"extractMetadata":{"parameterName":"parsedBody","parameterType":"unknown","returnType":"x"},"createStreamExtractor":{"members":[{"name":"process_chunk","parameters":["parsedChunk"],"returnType":"void"}]}}"#,
+            r#"{"extractMetadata":{"parameterName":"parsedBody","parameterType":"unknown","returnType":"x"},"createStreamExtractor":{"members":[{"name":"processChunk","parameters":["parsed_chunk"],"returnType":"void"}]}}"#,
+            r#"{"extractMetadata":{"parameterName":"parsedBody","parameterType":"unknown","returnType":"x"},"createStreamExtractor":{"members":[{"name":"build_metadata","parameters":[],"returnType":"x"}]}}"#,
         ];
         for faux in &faux {
             let relu: Result<MetadataExtractorDescriptor, _> = serde_json::from_str(faux);
             assert!(relu.is_err(), "{} must be rejected", faux);
+        }
+        for ride in &valeurs_fausses_ridees {
+            let relu: Result<MetadataExtractorDescriptor, _> = serde_json::from_str(ride);
+            assert!(
+                relu.is_ok(),
+                "a mistyped String value is accepted by serde, so {} must parse: the lock \
+                 is the constants, not the schema",
+                ride
+            );
         }
 
         // The one spelling a schema cannot catch, stated so nobody assumes it

@@ -84,7 +84,6 @@ mod tests {
 
     #[test]
     fn une_closure_asynchrone_donne_une_futur_qui_livre_son_resultat() {
-        use std::future::Future;
         use std::sync::Arc;
         use std::task::{Context, Poll, Wake, Waker};
 
