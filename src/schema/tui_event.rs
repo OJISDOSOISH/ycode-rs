@@ -20,9 +20,9 @@ pub const SESSION_SELECT: &str = "tui.session.select";
 /// Default decoding value of `ToastShow.duration`.
 pub const DEFAULT_TOAST_DURATION: i64 = 5000;
 
-/// The seventeen command names the TUI knows. Not exhaustive on the wire: any
+/// The sixteen command names the TUI knows. Not exhaustive on the wire: any
 /// string is accepted, this list is what the UI itself can trigger.
-pub const KNOWN_COMMANDS: [&str; 17] = [
+pub const KNOWN_COMMANDS: [&str; 16] = [
     "session.list",
     "session.new",
     "session.share",
@@ -137,10 +137,10 @@ mod tests {
     }
 
     #[test]
-    fn the_known_command_list_has_seventeen_entries() {
-        assert_eq!(KNOWN_COMMANDS.len(), 17);
+    fn the_known_command_list_has_sixteen_entries() {
+        assert_eq!(KNOWN_COMMANDS.len(), 16);
         assert_eq!(KNOWN_COMMANDS[0], "session.list");
-        assert_eq!(KNOWN_COMMANDS[16], "agent.cycle");
+        assert_eq!(KNOWN_COMMANDS[15], "agent.cycle");
     }
 
     #[test]
