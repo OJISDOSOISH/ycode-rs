@@ -1,4 +1,4 @@
-//! Port of the portable part of `opencode/packages/core/src/tool/registry.ts`.
+﻿//! Port of the portable part of `opencode/packages/core/src/tool/registry.ts`.
 //!
 //! The Effect service, the output store and the application-tools bridge are
 //! not ported. What is ported is the registry's two decisions, and both of
@@ -32,8 +32,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::permission::{Effect as RuleEffect, Ruleset};
-use crate::swarm::util_wildcard;
+use crate::permission::{Effect as RuleEffect, Rule, Ruleset};
 
 /// A tool as the registry stores it. The TS keeps an opaque `identity` beside
 /// it and a scope token; only the identity survives here, because comparing it
@@ -161,17 +160,20 @@ pub fn stale_tool_call(name: &str) -> String {
 /// and names `"*"` as the resource. Any later `allow` or `ask`, or a later deny
 /// scoped to particular resources, keeps the tool visible.
 pub fn wholly_disabled(action: &str, rules: &Ruleset) -> bool {
-    let rule = rules.iter().rev().find(|rule| wildcard::r#match(action, &rule.action));
+    let rule = rules
+        .iter()
+        .rev()
+        .find(|rule| crate::swarm::util_wildcard::r#match(action, &rule.action));
     match rule {
         Some(rule) => rule.resource == "*" && rule.effect == RuleEffect::Deny,
         None => false,
     }
 }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::permission::Rule;
 
     fn reg(identity: u64, action: &str) -> Registration {
         Registration { identity, action: action.to_string() }
@@ -203,33 +205,36 @@ mod tests {
 
     #[test]
     fn a_blanket_deny_hides_the_tool() {
-        let rules = vec![rule("*", "*", RuleEffect::Deny)];
+        let rules: Ruleset = vec![rule("*", "*", RuleEffect::Deny)];
         assert!(wholly_disabled("read", &rules));
     }
 
     #[test]
     fn a_later_allow_brings_the_tool_back() {
         // The rule that matters is the LAST match, not the first.
-        let rules = vec![rule("*", "*", RuleEffect::Deny), rule("read", "*", RuleEffect::Allow)];
+        let rules: Ruleset = vec![rule("*", "*", RuleEffect::Deny), rule("read", "*", RuleEffect::Allow)];
         assert!(!wholly_disabled("read", &rules), "findLast, not find");
         assert!(wholly_disabled("write", &rules), "write still matches the deny");
     }
 
     #[test]
     fn a_deny_scoped_to_resources_does_not_hide_the_tool() {
-        let rules = vec![rule("read", "/etc/*", RuleEffect::Deny)];
+        let rules: Ruleset = vec![rule("read", "/etc/*", RuleEffect::Deny)];
         assert!(!wholly_disabled("read", &rules), "the resource is not *");
     }
 
     #[test]
     fn no_matching_rule_never_hides_the_tool() {
-        assert!(!wholly_disabled("read", &[]));
-        assert!(!wholly_disabled("read", &[rule("write", "*", RuleEffect::Deny)]));
+        let none: Ruleset = Vec::new();
+        assert!(!wholly_disabled("read", &none));
+        let other: Ruleset = vec![rule("write", "*", RuleEffect::Deny)];
+        assert!(!wholly_disabled("read", &other));
     }
 
     #[test]
     fn an_ask_does_not_hide_the_tool() {
-        assert!(!wholly_disabled("read", &[rule("*", "*", RuleEffect::Ask)]));
+        let rules: Ruleset = vec![rule("*", "*", RuleEffect::Ask)];
+        assert!(!wholly_disabled("read", &rules));
     }
 
     #[test]
