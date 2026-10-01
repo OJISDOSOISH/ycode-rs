@@ -9,6 +9,7 @@
 
 
 
+
 pub mod command;
 pub mod config_agent;
 pub mod config_mcp;
@@ -44,6 +45,7 @@ pub mod snapshot;
 pub mod system_context;
 pub mod system_context_builtins;
 pub mod system_context_registry;
+pub mod tool_edit;
 pub mod tool_glob;
 pub mod tool_grep;
 pub mod tool_read;
