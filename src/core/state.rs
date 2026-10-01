@@ -27,11 +27,12 @@
 //!   not reloading.
 //!
 //! - Inside a `batch`, a transform does NOT reload immediately: it queues its
-//!   reload and the batch runs each queued reload once at the end. Since the
-//!   queue is a `Set` of reload functions and the same function is added once
-//!   per registration, N transforms in one batch produce ONE reload, not N.
-//!   That is the entire value of batching: a plugin group that touches six
-//!   settings reloads the value once.
+//!   reload and the batch runs each queued reload once at the end. The queue is a
+//!   `Set<Reload>`, and `Reload` is the single reload function the store builds
+//!   once - so N transforms of one store all queue THE SAME function and the set
+//!   collapses them to ONE reload. That is the entire value of batching: a plugin
+//!   group that touches six settings on one store reloads it once. Two different
+//!   stores do produce two reloads, because they queue two different functions.
 //!
 //! - A nested `batch` does not create a second batch. The inner one sees a
 //!   batch already in progress and just runs its body, so reloads queued inside
@@ -75,6 +76,29 @@ struct Entry<S> {
     run: Transform<S>,
 }
 
+/// A store's identity, which is what a batch queue deduplicates on.
+///
+/// See `NEXT_STORE_ID` for why the queue holds this rather than a registration
+/// id: in the TypeScript it holds the store's single reload FUNCTION.
+pub type StoreId = usize;
+
+/// Distinguishes stores from one another, so a batch queue can be keyed by
+/// STORE rather than by registration.
+///
+/// This exists because of one detail of the TypeScript that is easy to read
+/// past. The batch queue is a `Set<Reload>`, and `Reload` is a FUNCTION -
+/// specifically the single `reload` closure that `create` builds once per store.
+/// Every transform registered against that store queues THE SAME function
+/// object, so the `Set` collapses them: N transforms in one batch produce ONE
+/// reload. That is the entire point of batching.
+///
+/// Keying the queue by registration instead, as the first draft here did,
+/// breaks exactly that: two transforms on one store queue two distinct ids, the
+/// caller reloads twice, and the invariant the module header claims is quietly
+/// false. The final VALUE is the same either way, which is why nothing caught
+/// it - and why it needed a reading of the source rather than a run.
+static NEXT_STORE_ID: AtomicUsize = AtomicUsize::new(0);
+
 struct Inner<S> {
     committed: Option<S>,
     transforms: Vec<Entry<S>>,
@@ -95,10 +119,10 @@ fn in_batch() -> bool {
     BATCH_DEPTH.with(|depth| *depth.borrow() > 0)
 }
 
-fn queue_reload(id: usize) {
+fn queue_reload(store_id: StoreId) {
     BATCHED.with(|batched| {
         if let Some(current) = batched.borrow_mut().last_mut() {
-            current.insert(id);
+            current.insert(store_id);
         }
     });
 }
@@ -112,6 +136,9 @@ pub struct Store<S: Send + Sync + 'static> {
     finalize: Option<Box<dyn Fn(&S) + Send + Sync>>,
     inner: Mutex<Inner<S>>,
     next_id: AtomicUsize,
+    /// This store's identity, which is what a batch queue holds. See
+    /// `NEXT_STORE_ID` for why it is the store and not the registration.
+    store_id: StoreId,
 }
 
 /// What a registration hands back, as the TS `Registration` interface.
@@ -136,7 +163,13 @@ impl<S: Send + Sync + 'static> Store<S> {
             finalize: options.finalize,
             inner: Mutex::new(Inner { committed: Some(state), transforms: Vec::new() }),
             next_id: AtomicUsize::new(0),
+            store_id: NEXT_STORE_ID.fetch_add(1, Ordering::SeqCst),
         }
+    }
+
+    /// This store's identity - the value a batch queue deduplicates on.
+    pub fn store_id(&self) -> StoreId {
+        self.store_id
     }
 
     /// `get`: the committed value.
@@ -189,7 +222,7 @@ impl<S: Send + Sync + 'static> Store<S> {
             inner.transforms.push(Entry { id, active: true, run: update });
         }
         if in_batch() {
-            queue_reload(id);
+            queue_reload(self.store_id);
         } else {
             self.reload();
         }
@@ -214,7 +247,7 @@ impl<S: Send + Sync + 'static> Store<S> {
             queued = in_batch();
         }
         if queued {
-            queue_reload(registration.id);
+            queue_reload(self.store_id);
         } else {
             self.reload();
         }
@@ -234,17 +267,24 @@ impl<S: Send + Sync + 'static> Store<S> {
     }
 }
 
-/// What a batch returns: the body's value, and the reloads it queued.
+/// What a batch returns: the body's value, and the stores it queued a reload for.
 ///
 /// The TS runs the queued reloads itself on the way out, because it holds the
-/// store through the Effect context. Here the queue holds registration ids
+/// store through the Effect context. Here the queue holds store identities
 /// rather than closures over a store, so the caller runs them - which is more
 /// code but cannot quietly do the wrong thing for the wrong store.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BatchOutcome<R> {
     pub value: R,
-    /// Each registration whose reload was queued, deduplicated, ascending.
-    pub reloads: Vec<usize>,
+    /// The stores whose reload was queued, DEDUPLICATED and ascending.
+    ///
+    /// One entry per STORE, not per registration, and that is the source's
+    /// behaviour rather than a simplification of it: the TS queue is a
+    /// `Set<Reload>` where every transform of one store adds the same function.
+    /// Two transforms in one batch therefore reload ONCE. Reloading twice would
+    /// produce the same value, so the count is the only thing that can tell the
+    /// two implementations apart - and it is the thing batching exists to fix.
+    pub stores: Vec<usize>,
 }
 
 /// `batch`: run a body, collecting the reloads it queued.
@@ -254,19 +294,19 @@ pub struct BatchOutcome<R> {
 /// reported by the outer call.
 pub fn batch<R>(body: impl FnOnce() -> R) -> BatchOutcome<R> {
     if in_batch() {
-        return BatchOutcome { value: body(), reloads: Vec::new() };
+        return BatchOutcome { value: body(), stores: Vec::new() };
     }
     BATCH_DEPTH.with(|depth| *depth.borrow_mut() += 1);
     BATCHED.with(|batched| batched.borrow_mut().push(HashSet::new()));
     let value = body();
     let queued = BATCHED.with(|batched| batched.borrow_mut().pop().unwrap_or_default());
     BATCH_DEPTH.with(|depth| *depth.borrow_mut() -= 1);
-    let mut reloads: Vec<usize> = queued.into_iter().collect();
-    reloads.sort_unstable();
-    BatchOutcome { value, reloads }
+    let mut stores: Vec<usize> = queued.into_iter().collect();
+    stores.sort_unstable();
+    BatchOutcome { value, stores }
 }
 
-/// The reloads queued by the innermost open batch, ascending.
+/// The stores queued by the innermost open batch, ascending.
 ///
 /// Lets a caller inspect the queue from inside a batch body. Returns nothing
 /// outside a batch.
@@ -322,10 +362,13 @@ mod tests {
         store.transform(Box::new(move |state: &mut Lines| state.push(value.clone())))
     }
 
-    /// Applies the reloads a batch queued, which is what `batch` does on the way
-    /// out in the TS.
-    fn apply(store: &Store<Lines>, reloads: &[usize]) {
-        for _ in reloads {
+    /// Reloads `store` once per queued entry naming it - which is what `batch`
+    /// does on the way out in the TS: it holds the store through the Effect
+    /// context and calls each queued reload, and the queue holds ONE entry per
+    /// store however many of that store's transforms ran inside the batch.
+    fn reload_each<R>(store: &Store<Lines>, outcome: &BatchOutcome<R>) {
+        let times = outcome.stores.iter().filter(|id| **id == store.store_id()).count();
+        for _ in 0..times {
             store.reload();
         }
     }
@@ -483,9 +526,17 @@ mod tests {
     }
 
     // --- batching ---
+    //
+    // The counts below are PER STORE, and that is the whole point of the batch
+    // queue. The TypeScript queue is a `Set<Reload>` where `Reload` is the one
+    // function `create` built for that store, so every transform of a store adds
+    // the SAME object and the set collapses them. Two transforms therefore queue
+    // ONE reload. An earlier version of this port keyed the queue by
+    // registration instead, so it queued two - and every assertion here that
+    // expected two was wrong in the same direction as the bug it was describing.
 
     #[test]
-    fn inside_a_batch_nothing_is_published_until_the_batch_closes() {
+    fn nothing_is_published_inside_a_batch_until_it_closes() {
         let s = store();
         let observed = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Vec<String>>::new()));
         let seen = observed.clone();
@@ -500,33 +551,55 @@ mod tests {
             vec![Vec::<String>::new(), Vec::new()],
             "both reads saw the pre-batch value"
         );
-        assert_eq!(outcome.reloads.len(), 2);
-        apply(&s, &outcome.reloads);
+        assert_eq!(outcome.stores, vec![s.store_id()], "two transforms, ONE store");
+        reload_each(&s, &outcome);
         assert_eq!(s.get(), Some(vec!["a".into(), "b".into()]));
     }
 
     #[test]
-    fn a_batch_with_no_transform_queues_nothing() {
+    fn two_transforms_of_one_store_reload_once() {
+        // Stated on its own because it is the invariant: reloading twice would
+        // produce the same VALUE, so nothing else in this file can detect it.
         let s = store();
-        let outcome = batch(|| push(&s, "a"));
-        // `push` reloads immediately when no batch is open, and this one is open.
-        assert_eq!(outcome.reloads.len(), 1);
-        assert_eq!(s.get(), Some(Vec::new()));
-        apply(&s, &outcome.reloads);
-        assert_eq!(s.get(), Some(vec!["a".into()]));
+        let outcome = batch(|| {
+            push(&s, "a");
+            push(&s, "b");
+            push(&s, "c");
+        });
+        assert_eq!(outcome.stores.len(), 1, "one store, one queued reload");
     }
 
     #[test]
-    fn the_queue_holds_each_registration_once() {
-        let s = store();
-        let a = push(&s, "a");
+    fn two_stores_reload_twice() {
+        // The other half of the same rule, and the reason the queue is keyed by
+        // store rather than collapsed to a single flag: two different stores
+        // queue two different reload FUNCTIONS, so two entries.
+        let a = store();
+        let b = store();
         let outcome = batch(|| {
-            // The same registration queued twice must collapse, which is what a
-            // Set of reload functions buys in the TS.
-            queue_reload(a.id());
-            queue_reload(a.id());
+            push(&a, "x");
+            push(&b, "y");
         });
-        assert_eq!(outcome.reloads, vec![a.id()]);
+        assert_eq!(outcome.stores.len(), 2);
+        let mut ids = outcome.stores.clone();
+        ids.sort_unstable();
+        let mut expected = vec![a.store_id(), b.store_id()];
+        expected.sort_unstable();
+        assert_eq!(ids, expected);
+    }
+
+    #[test]
+    fn the_queue_holds_each_store_once() {
+        let s = store();
+        push(&s, "a");
+        let outcome = batch(|| {
+            // The same store queued again must collapse, which is what a Set of
+            // reload functions buys in the TS.
+            queue_reload(s.store_id());
+            queue_reload(s.store_id());
+            assert_eq!(queued_now(), vec![s.store_id()]);
+        });
+        assert_eq!(outcome.stores, vec![s.store_id()]);
     }
 
     #[test]
@@ -537,10 +610,10 @@ mod tests {
             let inner = batch(|| {
                 depths.lock().unwrap().push(in_batch());
             });
-            assert!(inner.reloads.is_empty(), "the inner batch reports nothing of its own");
+            assert!(inner.stores.is_empty(), "the inner batch reports nothing of its own");
         });
         assert_eq!(*depths.lock().unwrap(), vec![true, true]);
-        assert!(outcome.reloads.is_empty(), "nothing was queued at all");
+        assert!(outcome.stores.is_empty(), "nothing was queued at all");
     }
 
     #[test]
@@ -551,11 +624,12 @@ mod tests {
             let inner = batch(|| {
                 push(&s, "b");
             });
-            assert!(inner.reloads.is_empty(), "the inner batch keeps its reloads inside");
+            assert!(inner.stores.is_empty(), "the inner batch keeps its reloads inside");
+            assert_eq!(queued_now(), vec![s.store_id()], "one entry for both transforms");
         });
-        assert_eq!(outcome.reloads.len(), 2, "both registrations reached the outer batch");
-        assert_eq!(s.get(), Some(Vec::new()), "and neither has run yet");
-        apply(&s, &outcome.reloads);
+        assert_eq!(outcome.stores, vec![s.store_id()], "both transforms reached the outer batch");
+        assert_eq!(s.get(), Some(Vec::new()), "and none has run yet");
+        reload_each(&s, &outcome);
         assert_eq!(s.get(), Some(vec!["a".into(), "b".into()]));
     }
 
@@ -564,11 +638,11 @@ mod tests {
         let s = store();
         let outcome = batch(|| {
             push(&s, "a");
-            assert_eq!(queued_now().len(), 1);
+            assert_eq!(queued_now(), vec![s.store_id()]);
             push(&s, "b");
-            assert_eq!(queued_now().len(), 2);
+            assert_eq!(queued_now(), vec![s.store_id()], "still one store");
         });
-        assert_eq!(outcome.reloads.len(), 2);
+        assert_eq!(outcome.stores, vec![s.store_id()]);
     }
 
     #[test]
@@ -582,9 +656,9 @@ mod tests {
         let a = push(&s, "a");
         push(&s, "b");
         let outcome = batch(|| s.dispose(a));
-        assert_eq!(outcome.reloads, vec![a.id()], "one queued reload, for the dispose");
+        assert_eq!(outcome.stores, vec![s.store_id()], "one queued reload, for the dispose");
         assert_eq!(s.get(), Some(vec!["a".into(), "b".into()]), "not yet applied");
-        apply(&s, &outcome.reloads);
+        reload_each(&s, &outcome);
         assert_eq!(s.get(), Some(vec!["b".into()]));
     }
 
