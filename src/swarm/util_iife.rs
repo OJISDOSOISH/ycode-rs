@@ -84,6 +84,11 @@ mod tests {
 
     #[test]
     fn une_closure_asynchrone_donne_une_futur_qui_livre_son_resultat() {
+        // NOT an unused import, despite the name appearing only here: `.poll()`
+        // below is called on a `Pin<&mut F>`, and that method comes from the
+        // `Future` trait. Method resolution needs the trait in scope even though
+        // the word "Future" is never written again. Removing it is E0599.
+        use std::future::Future;
         use std::sync::Arc;
         use std::task::{Context, Poll, Wake, Waker};
 
