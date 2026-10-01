@@ -224,9 +224,11 @@ mod tests {
         }
     }
 
-    /// Timestamp invente, et utilise par un seul test, pour que le compteur
-    /// parte bien de zero.
-    const MILLE: i64 = 1_900_000_000_001;
+    // Chaque test qui observe le compteur prend son propre timestamp, sinon le
+    // compteur global (`STATE.counter`) ne repart pas de zero entre deux tests
+    // qui partagent un timestamp, et une assertion sur sa valeur absolue devient
+    // dependante de l'ordre d'execution. C'est ce qui a fait echouer un test de
+    // ce fichier au run 0f66ff4.
 
     #[test]
     fn un_identifiant_ascendant_tient_toujours_dans_le_format_attendu() {
@@ -265,17 +267,20 @@ mod tests {
     #[test]
     fn deux_identifiants_de_la_meme_milliseonde_different_d_un_cran() {
         let _garde = verrouiller();
-        let premier = create_at(false, MILLE);
-        let second = create_at(false, MILLE);
-        // Meme milliseconde : le compteur passe de 1 a 2, ce qui n'ecrit que
-        // dans les trois derniers caracteres hex du segment temporel (les 12
-        // bits bas de `current`), pas dans les neuf premiers.
+        // Timestamp propre a ce test : le compteur est un etat de module qui
+        // continue de croitre tant que le timestamp ne change pas, et un autre
+        // test pourrait l'avoir deja fait avancer. On ne suppose donc pas qu'il
+        // vaut 1 ici.
+        const MS: i64 = 1_900_000_000_555;
+        let premier = create_at(false, MS);
+        let second = create_at(false, MS);
+        let compteur = |id: &str| i64::from_str_radix(&id[TIME_LENGTH - 3..TIME_LENGTH], 16).expect("hex");
         assert_eq!(premier.len(), LENGTH);
+        // Meme milliseconde : le compteur monte de un, ce qui n'ecrit que dans
+        // les trois derniers caracteres hex du segment (les 12 bits bas de
+        // `current`), pas dans les neuf premiers.
         assert_eq!(&premier[..TIME_LENGTH - 3], &second[..TIME_LENGTH - 3]);
-        // Le compteur est visible dans les trois derniers caracteres hex :
-        // counter=1 -> "...001", counter=2 -> "...002".
-        assert!(premier[..TIME_LENGTH].ends_with("001"));
-        assert!(second[..TIME_LENGTH].ends_with("002"));
+        assert_eq!(compteur(&second), compteur(&premier) + 1);
         // La partie aleatoire differencie les deux identifiants.
         assert_ne!(premier, second);
     }
@@ -283,16 +288,46 @@ mod tests {
     #[test]
     fn un_changement_de_milliseonde_remet_le_compteur_a_zero() {
         let _garde = verrouiller();
-        let premier = create_at(false, MILLE);
-        let second = create_at(false, MILLE + 1);
-        // Milliseconde suivante : le compteur repart de 1 et le milliseconde
-        // ecrite dans les neuf premiers caracteres hex change.
-        assert_ne!(&premier[..TIME_LENGTH], &second[..TIME_LENGTH]);
-        // Dans les deux cas le compteur vaut 1, donc les trois derniers
-        // caracteres hex sont "001" (le milliseconde ne touche pas a la
-        // partie basse tant qu'il reste dans la meme fenetre de 12 bits).
-        assert!(premier[..TIME_LENGTH].ends_with("001"));
-        assert!(second[..TIME_LENGTH].ends_with("001"));
+        // Timestamps propres a ce test : le compteur est un etat de module qui
+        // ne repart de zero que lorsque le timestamp differe du dernier vu.
+        // Deux tests qui partagent le meme timestamp ne peuvent donc pas
+        // supposer que le compteur vaut 1 - c'est exactement ce qui a fait
+        // echouer la premiere version de ce test. On prend ici des valeurs que
+        // nul autre test n'utilise, et on ne suppose rien sur le compteur de
+        // depart.
+        const PREMIER_MS: i64 = 1_900_000_000_777;
+        const SECOND_MS: i64 = 1_900_000_000_778;
+
+        // Le compteur occupe exactement les 12 bits bas, donc les TROIS derniers
+        // caracteres hex. Le quatrieme en partant de la droite appartient deja
+        // au milliseconde (`current = ts * 4096 + counter`), il ne fait pas
+        // partie du compteur.
+        let compteur = |id: &str| i64::from_str_radix(&id[TIME_LENGTH - 3..TIME_LENGTH], 16).expect("hex");
+
+        // Deux passages au meme timestamp : le compteur monte de un, et on ne
+        // suppose rien sur sa valeur de depart, qui depend de l'ordre des tests.
+        let a = create_at(false, PREMIER_MS);
+        let b = create_at(false, PREMIER_MS);
+        assert_eq!(
+            compteur(&b),
+            compteur(&a) + 1,
+            "same millisecond must bump the counter by one"
+        );
+
+        // Un timestamp jamais vu remet le compteur a 1, puis a 2 : c'est la
+        // definition du reset, et elle ne depend d'aucun historique puisque
+        // PREMIER_MS comme SECOND_MS sont propres a ce test.
+        let c = create_at(false, SECOND_MS);
+        let d = create_at(false, SECOND_MS);
+        assert_eq!(compteur(&c), 1, "a brand new millisecond starts the counter at one");
+        assert_eq!(compteur(&d), 2, "the second id of that millisecond is two");
+
+        // Le milliseconde lui-meme est ecrit dans les neuf caracteres hex de
+        // tete (les 48 bits moins les 12 du compteur) : deux timestamps
+        // differents y different. On compare bien les neuf, pas huit : l'ecart
+        // entre deux millisecondes voisines tombe dans le 9e caractere, et une
+        // comparaison sur huit serait vraie a tort.
+        assert_ne!(&a[..TIME_LENGTH - 3], &c[..TIME_LENGTH - 3]);
     }
 
     #[test]
