@@ -1089,7 +1089,11 @@ mod tests {
         // Quelques reperes de structure, pour attraper une recopie tronquee.
         for reperes in [
             "# Customizing opencode",
-            "**https://opencode.ai/config.json**",
+            // The source writes the URL as a markdown autolink, angle brackets
+            // included: `**<https://opencode.ai/config.json>**` on line 19. The
+            // brackets are part of the text, so the marker without them does not
+            // occur in the file.
+            "**<https://opencode.ai/config.json>**",
             "## opencode.json",
             "## Skills",
             "## Agents",

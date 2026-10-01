@@ -529,6 +529,20 @@ mod tests {
         let mut fournisseur = cerebras("cerebras");
         fournisseur.integration_id = Some("int_1".to_string());
         let valeur = serde_json::to_value(&fournisseur).expect("serialisation");
+        // `disabled` is `Option<bool>` and the helper leaves it None, and the
+        // TypeScript declares it `disabled?: boolean` -- absent, not false. So it
+        // is not serialised, and expecting it here was wrong: the port omits it,
+        // which is what the source does.
+        assert_eq!(
+            cles(&valeur),
+            vec!["api", "id", "integrationID", "name", "request"]
+        );
+
+        // And with it set, the name shows up. `serde_json::Value`'s object is a
+        // BTreeMap, so the keys come out sorted -- that is why every expected
+        // list here is alphabetical.
+        fournisseur.disabled = Some(true);
+        let valeur = serde_json::to_value(&fournisseur).expect("serialisation");
         assert_eq!(
             cles(&valeur),
             vec!["api", "disabled", "id", "integrationID", "name", "request"]
@@ -591,14 +605,35 @@ mod tests {
     fn les_noms_de_champs_json_de_l_api_et_de_la_requete_sont_exacts() {
         let fournisseur = cerebras("cerebras");
         let valeur = serde_json::to_value(&fournisseur).expect("serialisation");
+        // The TypeScript declares `url?` and `settings?` on the aisdk variant, so
+        // with both absent they are not serialised. The sibling test below shows
+        // the same rule on the native variant and passes; this one expected the
+        // four names anyway, which the source does not produce.
         assert_eq!(
             cles(&valeur.get("api").unwrap()),
-            vec!["package", "settings", "type", "url"]
+            vec!["package", "type"]
         );
         assert_eq!(
             cles(&valeur.get("request").unwrap()),
             vec!["body", "headers"]
         );
+
+        // Populated, all four names appear -- and the flat shape is confirmed:
+        // `type` is a field of the same object as `package`, not a wrapper key.
+        let complet = ProviderApi::Aisdk {
+            package: CerebrasPlugin::AISDK_PACKAGE.to_string(),
+            url: Some("https://api.cerebras.ai".to_string()),
+            settings: Some(BTreeMap::from([(
+                "model".to_string(),
+                serde_json::json!("llama-3.3-70b"),
+            )])),
+        };
+        let valeur = serde_json::to_value(&complet).expect("serialisation");
+        assert_eq!(
+            cles(&valeur),
+            vec!["package", "settings", "type", "url"]
+        );
+        assert_eq!(valeur.get("type").unwrap(), "aisdk");
     }
 
     #[test]

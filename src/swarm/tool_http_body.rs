@@ -758,11 +758,16 @@ mod tests {
 
     #[test]
     fn la_croissance_double_sans_depasser_la_borne() {
-        // `max(needed, bodyLength * 2)`, plafonne par `maximumBytes`.
+        // `max(needed, bodyLength * 2)` plafonne par `maximumBytes`, donc
+        // l'ordre des arguments est (bodyLength, needed, maximumBytes).
         assert_eq!(grown_buffer_length(1, 100, 1_000_000), 100, "un gros morceau impose sa taille");
         assert_eq!(grown_buffer_length(4, 5, 1_000_000), 8, "sinon la taille double");
         assert_eq!(grown_buffer_length(8, 9, 1_000_000), 16, "sinon la taille double");
-        assert_eq!(grown_buffer_length(4, 9, 10), 10, "la borne l emporte sur le doublement");
+        // Pour que la borne l'emporte, le doublement doit la DEPASSER : ici
+        // 9 * 2 = 18, plafonne a 10. Avec les deux premiers arguments inverses
+        // (4, 9) le doublement ne valait que 8, la valeur 9 passait sous la
+        // borne de 10, et le test ne verifiait pas du tout ce qu'il annonçait.
+        assert_eq!(grown_buffer_length(9, 4, 10), 10, "la borne l emporte sur le doublement");
         // Un doublement qui deborderait en arithmetiqueEntiere est sature, puis
         // borne de toute facon.
         assert_eq!(grown_buffer_length(u64::MAX, u64::MAX, u64::MAX), u64::MAX);

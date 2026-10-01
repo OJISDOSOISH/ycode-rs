@@ -641,7 +641,15 @@ mod tests {
         let second = start(&mut mutex, "a");
 
         assert!(second.holds_permit());
-        assert_eq!(mutex.classify_key(&"a".to_string()), RequestKind::Free);
+        // The permit is HELD, so the key is not free: a third caller would have
+        // to queue behind `second`. The source agrees -- `withPermit` only lets
+        // one holder through, and the entry stays in the map while `users > 0`
+        // (keyed-mutex.ts:30-37). "Free" would mean a caller could take it now.
+        assert_ne!(
+            mutex.classify_key(&"a".to_string()),
+            RequestKind::Free,
+            "a held permit is not a free key"
+        );
         let entry = mutex.entry(&"a".to_string()).expect("new entry");
         assert_eq!(entry.waiters.len(), 0);
         assert_eq!(entry.users, 1);
@@ -722,7 +730,17 @@ mod tests {
         let ticket = start(&mut mutex, "a");
         assert_eq!(classify(&mutex.state, &key), RequestKind::Queued);
         mutex.complete(ticket);
-        assert_eq!(classify(&mutex.state, &key), RequestKind::Free);
+        // Completing REMOVES the entry, so the key reads as brand new, not free.
+        // This is the source's explicit rule: "Entries are removed when no
+        // holder or waiter remains", keyed-mutex.ts:12, implemented as
+        // `entry.users--; if (entry.users === 0) locks.delete(key)` at :33-35.
+        // A "Free" verdict here would mean the key is still in the map, and it
+        // is not.
+        assert_eq!(classify(&mutex.state, &key), RequestKind::Fresh);
+        assert!(
+            !mutex.state.contains_key(&key),
+            "the entry must be gone from the map, not merely unreferenced"
+        );
     }
 
     #[test]
