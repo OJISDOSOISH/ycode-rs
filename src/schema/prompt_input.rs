@@ -12,13 +12,12 @@
 //! agent objects. That copy is the reduced one; consolidating it onto these
 //! types is still open.
 
-use serde_json::json;
-
 pub use crate::core::session_event::{AgentAttachment, FileAttachment, Prompt, PromptSource as Source};
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn a_file_attachment_keeps_uri_and_drops_absent_optionals() {

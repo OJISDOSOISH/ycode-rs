@@ -20,7 +20,6 @@
 //!   n est pas reproduit ici pour ne rien inventer.
 
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 
 /// Nom d application ajoute a chaque base XDG, comme `path.join(xdg, app)`.
 pub const APP_NAME: &str = "opencode";

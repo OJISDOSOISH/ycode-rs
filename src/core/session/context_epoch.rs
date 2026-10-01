@@ -15,7 +15,6 @@
 //!   toucher au baseline, ce qui evite de perdre la fenetre de contexte.
 
 use crate::core::session::history::{latest_compaction, BaselineSeq, Entry};
-use crate::schema::session_message::Message;
 
 /// Resultat de la reconciliation entre le snapshot stocke et l'etat actuel du
 /// systeme.
@@ -161,7 +160,7 @@ mod tests {
     use super::*;
     use crate::core::session::history::Window;
     use crate::schema::session_message::{
-        Compaction, CompactionReason, MessageBase, User, Prompt,
+        Compaction, CompactionReason, Message, MessageBase, Prompt, User,
     };
 
     fn user(seq: i64, id: &str) -> Entry {

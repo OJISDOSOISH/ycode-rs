@@ -9,9 +9,6 @@
 //! `workspaceID` keeps the capital ID - it is not `workspaceId`.
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-
-use serde_json::Value;
 
 /// Absolute path string (`AbsolutePath` in the TS source).
 pub type AbsolutePath = String;
@@ -65,6 +62,8 @@ pub struct LocationResponse<D> {
 mod tests {
     use super::*;
     use serde_json::json;
+    use serde_json::Value;
+    use std::collections::BTreeMap;
 
     #[test]
     fn a_ref_keeps_the_workspace_id_capitals() {

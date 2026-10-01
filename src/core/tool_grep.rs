@@ -11,7 +11,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::tool_read_filesystem::{DirectoryEntry, EntryKind};
+use super::tool_read_filesystem::DirectoryEntry;
 
 /// Tool name.
 pub const NAME: &str = "grep";
@@ -68,6 +68,7 @@ pub fn to_model_output(matches: &[Match]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::tool_read_filesystem::EntryKind;
 
     fn m(name: &str, line: u64, text: &str) -> Match {
         Match {
