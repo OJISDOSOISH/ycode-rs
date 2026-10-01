@@ -572,10 +572,13 @@ mod tests {
     }
 
     #[test]
-    fn the_counter_is_never_allowed_to_disturb_the_high_thirty_six_bits() {
-        // 4096 is the first counter value that carries into the time field. We
-        // cannot force that many ids here, so we check the guarantee that makes
-        // it harmless: the fixed prefix is still exactly the millisecond.
+    fn the_counter_is_never_allowed_to_disturb_the_millisecond() {
+        // The counter lives in the low twelve bits of `current`, i.e. the last
+        // three of the twelve hex characters. 4096 is the first counter value
+        // that would carry into the millisecond. We cannot force that many ids
+        // here, so we check the guarantee that makes it harmless: reading the
+        // twelve characters back and dividing by 0x1000 still yields the
+        // millisecond, because that division cancels the counter.
         for _ in 0..8 {
             let id = create("ses", Direction::Ascending, Some(TS));
             let recovered = timestamp(&id).expect("a generated id always parses");
