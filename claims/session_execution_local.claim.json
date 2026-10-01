@@ -1,0 +1,6 @@
+{
+  "owner": "kilo-swarm13",
+  "started": "2026-09-30T20:06:17Z",
+  "source": "packages/core/src/session/execution/local.ts",
+  "target": "src/swarm/session_execution_local.rs"
+}

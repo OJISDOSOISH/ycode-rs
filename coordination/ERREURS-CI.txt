@@ -1,0 +1,38 @@
+﻿src\swarm\pty_protocol.rs:235  E0422  cannot find struct, variant or union type `EreurCadre` in this scope
+src\swarm\util_which.rs:455  E0106  missing lifetime specifier
+src\swarm\copilot_openai_config.rs:718  E0277  the trait bound `NaiveConfigProbe: Default` is not satisfied
+src\swarm\cpk_metadata_extractor.rs:689  E0308  mismatched types
+src\swarm\effect_keyed_mutex.rs:172  E0308  mismatched types
+src\swarm\plugin_variant.rs:469  E0599  no associated function or constant named `empty_info` found for struct `model::ModelInfo` in the current scope
+src\swarm\util_encode.rs:398  E0277  the trait bound `usize: From<u32>` is not satisfied
+src\swarm\util_retry.rs:291  E0277  the trait bound `f64: Eq` is not satisfied
+src\swarm\account_sql.rs:1540  E0277  the trait bound `std::string::String: Borrow<&str>` is not satisfied
+src\swarm\copilot_openai_config.rs:731  E0277  the trait bound `NaiveConfigProbe: serde::Deserialize<'de>` is not satisfied
+src\swarm\copilot_openai_config.rs:737  E0277  the trait bound `NaiveConfigProbe: serde::Deserialize<'de>` is not satisfied
+src\swarm\copilot_openai_config.rs:741  E0277  the trait bound `NaiveConfigProbe: serde::Deserialize<'de>` is not satisfied
+src\swarm\copilot_openai_config.rs:774  E0282  type annotations needed
+src\swarm\cpk_metadata_extractor.rs:1140  E0308  mismatched types
+src\swarm\effect_runtime.rs:929  E0308  mismatched types
+src\swarm\plugin_variant.rs:666  E0599  no associated function or constant named `empty_info` found for struct `model::ModelInfo` in the current scope
+src\swarm\session_prompt.rs:251  E0599  no variant, associated function, or constant named `Objet` found for enum `serde_json::Value` in the current scope
+src\swarm\session_prompt.rs:260  E0599  no variant, associated function, or constant named `Table` found for enum `serde_json::Value` in the current scope
+src\swarm\util_which.rs:778  E0525  expected a closure that implements the `Fn` trait, but this closure only implements `FnMut`
+src\swarm\v1_config_console_state.rs:808  E0107  function takes 0 generic arguments but 1 generic argument was supplied
+src\swarm\v1_config_layout.rs:306  E0107  function takes 0 generic arguments but 1 generic argument was supplied
+src\swarm\v1_config_layout.rs:455  E0308  mismatched types
+src\swarm\v1_config_layout.rs:456  E0599  no method named `is_err` found for struct `v1_config_layout::tests::Porteur` in the current scope
+src\swarm\tool_http_body.rs:511  E0596  cannot borrow `too_large` as mutable, as it is not declared as mutable
+src\swarm\effect_runtime.rs:967  E0716  temporary value dropped while borrowed
+src\swarm\id_id.rs:607  E0716  temporary value dropped while borrowed
+src\swarm\id_id.rs:608  E0716  temporary value dropped while borrowed
+src\swarm\npm_config.rs:373  E0308  mismatched types
+src\swarm\provider_dynamic.rs:1070  E0515  cannot return value referencing temporary value
+src\swarm\pty_node.rs:795  E0382  borrow of moved value: `faux`
+src\swarm\pty_node.rs:823  E0382  borrow of moved value: `faux`
+src\swarm\pty_node.rs:844  E0382  borrow of moved value: `faux`
+src\swarm\session_execution_local.rs:1459  E0716  temporary value dropped while borrowed
+src\swarm\session_prompt.rs:333  E0507  cannot move out of index of `Vec<core::session_event::FileAttachment>`
+src\swarm\util_module.rs:775  E0716  temporary value dropped while borrowed
+src\swarm\v1_config_attachment.rs:585  E0382  borrow of partially moved value: `info`
+src\swarm\v1_config_attachment.rs:601  E0382  borrow of partially moved value: `info`
+src\swarm\v1_config_attachment.rs:652  E0382  borrow of partially moved value: `saisi`

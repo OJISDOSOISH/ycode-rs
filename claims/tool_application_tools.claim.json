@@ -1,0 +1,6 @@
+{
+  "owner": "kilo-swarm13",
+  "started": "2026-09-30T20:06:18Z",
+  "source": "packages/core/src/tool/application-tools.ts",
+  "target": "src/swarm/tool_application_tools.rs"
+}

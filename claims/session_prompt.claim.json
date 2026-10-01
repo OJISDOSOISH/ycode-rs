@@ -1,0 +1,1 @@
+﻿{"owner":"kilo-swarm4","started":"2026-09-30T21:48:37Z","source":"packages/schema/src/prompt.ts","target":"src/swarm/session_prompt.rs","note":"core/src/session/prompt.ts is a 94-byte reexport with no Rust equivalent; this file ports the schema contract it re-exports, as its header states"}

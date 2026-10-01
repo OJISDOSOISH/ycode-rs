@@ -1,0 +1,6 @@
+{
+  "owner": "kilo-swarm11",
+  "started": "2026-09-30T17:54:50Z",
+  "source": "packages/core/src/effect/keyed-mutex.ts",
+  "target": "src/swarm/effect_keyed_mutex.rs"
+}

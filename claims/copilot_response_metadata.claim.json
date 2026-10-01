@@ -1,0 +1,1 @@
+{"owner":"kilo-swarm4","started":"2026-09-30T16:06:14Z","source":"packages/core/src/github-copilot/chat/get-response-metadata.ts","target":"src/swarm/copilot_response_metadata.rs"}

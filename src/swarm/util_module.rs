@@ -254,12 +254,16 @@ pub fn resolve(id: &str, dir: &str) -> Option<String> {
 /// donne `package: "@scope"` avec un sous-chemin vide. Une chaine vide reste
 /// un paquet de nom vide, et l'appelant verra `None` plutot qu'une panne.
 pub fn specifier(id: &str) -> Specifier {
+    let is_unix_absolute = id.starts_with('/');
+    let is_windows_absolute = cfg!(windows) && Path::new(id).is_absolute();
+    let is_windows_relative = cfg!(windows) && (id.starts_with(".\\") || id.starts_with("..\\"));
     let relatif = id.starts_with("./")
         || id.starts_with("../")
         || id == "."
         || id == ".."
-        || Path::new(id).is_absolute()
-        || (cfg!(windows) && (id.starts_with(".\\") || id.starts_with("..\\")));
+        || is_unix_absolute
+        || is_windows_absolute
+        || is_windows_relative;
     if relatif {
         return Specifier::Relative(id.to_string());
     }
@@ -372,7 +376,13 @@ pub fn candidates(id: &str, dir: &str) -> Vec<Candidate> {
 fn node_modules_dirs(base: &Path) -> Vec<PathBuf> {
     let composants: Vec<Component<'_>> = base.components().collect();
     let mut dirs = Vec::new();
-    for index in (0..composants.len()).rev() {
+    // Iterate down to the root directory component (inclusive), but not the
+    // drive prefix alone, which would produce a relative path like `C:node_modules`.
+    let root_index = composants
+        .iter()
+        .rposition(|c| matches!(c, Component::RootDir))
+        .unwrap_or(0);
+    for index in (root_index..composants.len()).rev() {
         let prefixe: PathBuf = composants[..=index].iter().copied().collect();
         if dernier_nomme(&prefixe, "node_modules") {
             continue;
@@ -517,6 +527,11 @@ fn dernier_nomme(path: &Path, nom: &str) -> bool {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Normalise un chemin en remplaçant les séparateurs Windows par `/`.
+    fn norm(p: &Path) -> String {
+        p.to_string_lossy().replace('\\', "/")
+    }
 
     /// Compteur de suffixe, pour que deux tests n obtiennent pas le meme
     /// repertoire temporaire.
@@ -866,7 +881,7 @@ mod tests {
             r#"{"name":"typescript"}"#,
         );
         assert_eq!(resolve("typescript/lib/tsserver.js", &root.to_string_lossy()), Some(
-            file.to_string_lossy().into_owned()
+            norm(&file)
         ));
     }
 
@@ -886,7 +901,7 @@ mod tests {
         );
         assert_eq!(
             resolve("eslint", &cwd.to_string_lossy()),
-            Some(file.to_string_lossy().into_owned())
+            Some(norm(&file))
         );
     }
 
@@ -907,8 +922,8 @@ mod tests {
 
         let gauche_obtenu = resolve("biome", &a.to_string_lossy());
         let droite_obtenu = resolve("biome", &b.to_string_lossy());
-        assert_eq!(gauche_obtenu, Some(gauche.to_string_lossy().into_owned()));
-        assert_eq!(droite_obtenu, Some(droite.to_string_lossy().into_owned()));
+        assert_eq!(gauche_obtenu, Some(norm(&gauche)));
+        assert_eq!(droite_obtenu, Some(norm(&droite)));
         assert_ne!(gauche_obtenu, droite_obtenu);
     }
 
@@ -961,7 +976,7 @@ mod tests {
         tmp.fichier("p/node_modules/pkg/index.js", "y");
         assert_eq!(
             resolve("pkg", &tmp.chemin().join("p").to_string_lossy()),
-            Some(main.to_string_lossy().into_owned())
+            Some(norm(&main))
         );
     }
 
@@ -986,12 +1001,12 @@ mod tests {
             r#"{"name":"vide","main":""}"#,
         );
         let p = tmp.chemin().join("p").to_string_lossy().into_owned();
-        assert_eq!(resolve("sans", &p), Some(index.to_string_lossy().into_owned()));
+        assert_eq!(resolve("sans", &p), Some(norm(&index)));
         assert_eq!(
             resolve("fantome", &p),
-            Some(fantome.to_string_lossy().into_owned())
+            Some(norm(&fantome))
         );
-        assert_eq!(resolve("vide", &p), Some(vide.to_string_lossy().into_owned()));
+        assert_eq!(resolve("vide", &p), Some(norm(&vide)));
     }
 
     #[test]
@@ -1005,7 +1020,7 @@ mod tests {
         let p = tmp.chemin().join("p").to_string_lossy().into_owned();
         assert_eq!(
             resolve("pkg", &p),
-            Some(index.to_string_lossy().into_owned())
+            Some(norm(&index))
         );
     }
 
@@ -1026,7 +1041,7 @@ mod tests {
         let tmp = Tmp::nouveau("cwd");
         let file = tmp.fichier("p/node_modules/pkg/index.js", "x");
         let p = tmp.chemin().join("p").to_string_lossy().into_owned();
-        let attendu = Some(file.to_string_lossy().into_owned());
+        let attendu = Some(norm(&file));
         assert_eq!(resolve("pkg", &p), attendu);
         assert_eq!(resolve("pkg", &p), attendu, "deux appels, meme reponse");
     }

@@ -1,0 +1,6 @@
+{
+  "owner": "kilo-swarm11",
+  "started": "2026-09-30T17:54:46Z",
+  "source": "packages/core/src/plugin/variant.ts",
+  "target": "src/swarm/plugin_variant.rs"
+}

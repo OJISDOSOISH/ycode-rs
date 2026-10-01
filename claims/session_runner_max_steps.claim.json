@@ -1,0 +1,6 @@
+{
+  "owner": "kilo-swarm8",
+  "started": "2026-09-30T16:35:01Z",
+  "source": "packages/core/src/session/runner/max-steps.ts",
+  "target": "src/swarm/session_runner_max_steps.rs"
+}

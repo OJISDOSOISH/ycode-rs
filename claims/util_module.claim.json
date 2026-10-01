@@ -1,0 +1,6 @@
+{
+  "owner": "kilo-swarm4",
+  "started": "2026-09-30T15:57:08Z",
+  "source": "packages/core/src/util/module.ts",
+  "target": "src/swarm/util_module.rs"
+}
