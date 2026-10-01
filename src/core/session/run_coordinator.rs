@@ -160,63 +160,20 @@ where
                 entry
             };
 
-            // Executer drain(key, true) dans un thread separe.
-            let drain = self.drain.clone();
-            let key_ref = key.clone();
-            let entry_for_thread = Entry {
-                done: entry.done.clone(),
-                result: entry.result.clone(),
-                owner: None,
-                pending_wake: false,
-                stopping: false,
-            };
-            let active_clone = self.active.clone();
+            // Executer drain(key, true) dans un thread separe. Le worker
+            // appelle `settle`, qui ne prend le verrou qu'une seule fois.
+            let handle = Self::fork(&self.active, &self.drain, key.clone(), true);
 
-            let handle = thread::spawn(move || {
-                let result = drain(key_ref.clone(), true);
-                // Mettre a jour l'entree apres execution.
-                let mut active = active_clone.lock().unwrap();
-                if let Some(stored_entry) = active.get_mut(&key_ref) {
-                    stored_entry.owner = None;
-                    // Verifier si un wake etait en attente et qu'on ne s'arrete pas.
-                    if result.is_ok() && !stored_entry.stopping && stored_entry.pending_wake {
-                        stored_entry.pending_wake = false;
-                        drop(active);
-                        Self::start_successor(&active_clone, &drain, key_ref.clone(), false);
-                        entry_for_thread.complete(Ok(()));
-                        return;
-                    }
-                }
-                // Nettoyer ou preparer un successeur, sous une seule
-                // acquisition du verrou.
-                let successor = {
-                    let mut active = active_clone.lock().unwrap();
-                    match active.get_mut(&key_ref) {
-                        Some(stored) if stored.pending_wake => {
-                            stored.pending_wake = false;
-                            Some(Entry::new())
-                        }
-                        Some(_) => {
-                            active.remove(&key_ref);
-                            None
-                        }
-                        None => None,
-                    }
-                };
-
-                if let Some(succ) = successor {
-                    let stored = succ.clone_entry();
-                    active_clone.lock().unwrap().insert(key_ref.clone(), stored);
-                    Self::start_successor(&active_clone, &drain, key_ref, true);
-                }
-                entry_for_thread.complete(result);
-            });
-
-            // Stocker le handle dans l'entree active.
+            // Stocker le handle comme proprietaire, tant que l'entree du map
+            // est encore la notre : si le worker a deja rendu la main, c'est
+            // lui qui a pose `owner = None`.
             {
                 let mut active = self.active.lock().unwrap();
                 if let Some(stored_entry) = active.get_mut(&key) {
-                    stored_entry.owner = Some(handle);
+                    if Arc::ptr_eq(&stored_entry.done, &entry.done) && stored_entry.owner.is_none()
+                    {
+                        stored_entry.owner = Some(handle);
+                    }
                 }
             }
 
@@ -237,65 +194,9 @@ where
         }
 
         // Aucune execution active : demarrer une nouvelle execution non forcee.
-        let entry = Entry::new();
-        active.insert(key.clone(), Entry {
-            done: entry.done.clone(),
-            result: entry.result.clone(),
-            owner: None,
-            pending_wake: false,
-            stopping: false,
-        });
+        active.insert(key.clone(), Entry::new());
         drop(active);
-
-        let drain = self.drain.clone();
-        let key_ref = key.clone();
-        let entry_for_thread = Entry {
-            done: entry.done.clone(),
-            result: entry.result.clone(),
-            owner: None,
-            pending_wake: false,
-            stopping: false,
-        };
-        let active_clone = self.active.clone();
-
-        thread::spawn(move || {
-            let result = drain(key_ref.clone(), false);
-            let mut active = active_clone.lock().unwrap();
-            if let Some(stored_entry) = active.get_mut(&key_ref) {
-                stored_entry.owner = None;
-                if result.is_ok() && !stored_entry.stopping && stored_entry.pending_wake {
-                    stored_entry.pending_wake = false;
-                    drop(active);
-                    Self::start_successor(&active_clone, &drain, key_ref.clone(), false);
-                    entry_for_thread.complete(Ok(()));
-                    return;
-                }
-            }
-            let mut active = active_clone.lock().unwrap();
-            if let Some(stored_entry) = active.get_mut(&key_ref) {
-                let successor = if stored_entry.pending_wake {
-                    stored_entry.pending_wake = false;
-                    Some(Entry::new())
-                } else {
-                    None
-                };
-
-                if let Some(succ) = successor {
-                    active.insert(key_ref.clone(), Entry {
-                        done: succ.done.clone(),
-                        result: succ.result.clone(),
-                        owner: None,
-                        pending_wake: false,
-                        stopping: false,
-                    });
-                    drop(active);
-                    Self::start_successor(&active_clone, &drain, key_ref.clone(), true);
-                } else {
-                    active.remove(&key_ref);
-                }
-            }
-            entry_for_thread.complete(result);
-        });
+        Self::fork(&self.active, &self.drain, key, false);
     }
 
     /// Arrete l'execution active pour `key` et attend son nettoyage.
@@ -314,53 +215,93 @@ where
         }
     }
 
-    /// Demarre un thread successeur pour la cle donnee.
-    fn start_successor(
+    /// Demarre un worker pour la cle : il execute `drain`, puis appelle
+    /// `settle`. Utilise par `run`, `wake` et par chaque successeur.
+    fn fork(
         active: &Arc<Mutex<HashMap<Key, Entry<E>>>>,
         drain: &Arc<F>,
         key: Key,
-        _is_successor: bool,
-    ) {
+        force: bool,
+    ) -> thread::JoinHandle<()> {
+        let active = active.clone();
         let drain = drain.clone();
         let key_ref = key.clone();
-        let active_clone = active.clone();
-
         thread::spawn(move || {
-            let result = drain(key_ref.clone(), false);
-            let mut active = active_clone.lock().unwrap();
-            if let Some(stored_entry) = active.get_mut(&key_ref) {
-                stored_entry.owner = None;
-                if result.is_ok() && !stored_entry.stopping && stored_entry.pending_wake {
-                    stored_entry.pending_wake = false;
-                    drop(active);
-                    Self::start_successor(&active_clone, &drain, key_ref.clone(), false);
-                    return;
-                }
-            }
-            let mut active = active_clone.lock().unwrap();
-            if let Some(stored_entry) = active.get_mut(&key_ref) {
-                let successor = if stored_entry.pending_wake {
-                    stored_entry.pending_wake = false;
-                    Some(Entry::new())
-                } else {
-                    None
-                };
+            let result = drain(key_ref.clone(), force);
+            Self::settle(&active, &drain, &key_ref, result);
+        })
+    }
 
-                if let Some(succ) = successor {
-                    active.insert(key_ref.clone(), Entry {
-                        done: succ.done.clone(),
-                        result: succ.result.clone(),
-                        owner: None,
-                        pending_wake: false,
-                        stopping: false,
-                    });
-                    drop(active);
-                    Self::start_successor(&active_clone, &drain, key_ref.clone(), true);
-                } else {
-                    active.remove(&key_ref);
+    /// Portage de `settle` (run-coordinator.ts:51-65).
+    ///
+    /// Une seule acquisition de `active` pour toute la decision, puis le
+    /// verrou est libere avant tout demarrage de successeur. Deux
+    /// acquisitions imbriquees bloqueraient le worker sur son propre `Mutex`,
+    /// qui n'est pas reentrant : c'est exactement la pendaison du tout premier
+    /// run de tests (6 h de runner pour un test).
+    fn settle(
+        active: &Arc<Mutex<HashMap<Key, Entry<E>>>>,
+        drain: &Arc<F>,
+        key: &Key,
+        result: Result<(), E>,
+    ) {
+        /// Les trois decisions du `settle` du TS.
+        enum Next {
+            /// Reussite + wake en attente : l'entree courante enchaine, et
+            /// c'est le `settle` du successeur qui completera `done`.
+            Chain,
+            /// Wake en attente apres echec ou arret : une entree neuve prend
+            /// la clef, et l'ancienne est completee par le resultat actuel.
+            Replace,
+            /// Rien a la suite : l'entree est retiree et completee.
+            Finish,
+        }
+
+        let (next, current) = {
+            let mut map = active.lock().unwrap();
+            let Some(entry) = map.get_mut(key) else {
+                return;
+            };
+            // Copie partageant `done` et `result` : elle permet de completer
+            // l'entree remplacee apres avoir libere le verrou, comme le fait
+            // le TS (`Deferred.doneUnsafe(entry.done, exit)`).
+            let current = entry.clone_entry();
+            entry.owner = None;
+            let next = if result.is_ok() && !entry.stopping && entry.pending_wake {
+                entry.pending_wake = false;
+                Next::Chain
+            } else if entry.pending_wake {
+                entry.pending_wake = false;
+                Next::Replace
+            } else {
+                Next::Finish
+            };
+            (next, current)
+        };
+
+        match next {
+            Next::Chain => {
+                // Meme entree, `force = false` : le successeur garde le `done`
+                // de l'entree courante, comme `start(key, entry, false, true)`
+                // dans le TS.
+                Self::fork(active, drain, key.clone(), false);
+            }
+            Next::Replace => {
+                let stored = Entry::new().clone_entry();
+                active.lock().unwrap().insert(key.clone(), stored);
+                // Le TS passe aussi `force = false` pour un successeur :
+                // `start(key, successor, false, true)`.
+                Self::fork(active, drain, key.clone(), false);
+                // L'entree remplacee est completee par le resultat courant,
+                // elle aussi dans le TS (ligne 64, hors du if de depart).
+                current.complete(result);
+            }
+            Next::Finish => {
+                if let Some(entry) = active.lock().unwrap().remove(key) {
+                    entry.complete(result);
                 }
             }
-        });
+        }
     }
 }
 
