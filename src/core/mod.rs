@@ -22,6 +22,7 @@
 
 
 
+
 pub mod command;
 pub mod config_agent;
 pub mod config_mcp;
@@ -36,6 +37,7 @@ pub mod control_plane_move_session;
 pub mod copilot_chat;
 pub mod copilot_responses;
 pub mod credential;
+pub mod fs_util;
 pub mod git;
 pub mod global;
 pub mod image;
