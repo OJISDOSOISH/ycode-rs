@@ -649,7 +649,10 @@ impl BedrockPlugin {
             _ => None,
         };
 
-        if let Some(region) = region.clone() {
+        // `region` is already resolved: the option first, then the environment,
+        // then the default. So there is no `Option` left to unwrap here, which is
+        // why this used to read `if let Some(region) = region.clone()`.
+        if !region.is_empty() {
             options.insert("region".to_string(), Value::String(region));
         }
         if let Some(Value::String(endpoint)) = options.get("endpoint").cloned() {

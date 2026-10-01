@@ -323,7 +323,10 @@ pub fn fusionner_credential(
 ///
 /// Portage de `extractAccountID` : `claim(id_token) ?? claim(access_token)`.
 pub fn extraire_compte(jetons: &TokenResponse) -> Option<String> {
-    Some(revendication(&jetons.id_token).unwrap_or_else(|| revendication(&jetons.access_token)))
+    // `a ?? b` on two `Option<String>` is `or_else`, not `unwrap_or_else`:
+    // the fallback is itself optional, and it is not evaluated when the first
+    // one is present.
+    revendication(&jetons.id_token).or_else(|| revendication(&jetons.access_token))
 }
 
 /// Lit `chatgpt_account_id` dans la charge utile d'un JWT.
@@ -342,8 +345,8 @@ pub fn revendication(token: &str) -> Option<String> {
     // because `.and_then` hands the next closure an un-inferred generic.
     decoder_base64url(partie)
         .ok()
-        .and_then(|octets| std::str::from_utf8(&octets).ok())
-        .and_then(|texte| serde_json::from_str::<Claims>(texte).ok())
+        .and_then(|octets| std::str::from_utf8(&octets).ok().map(str::to_string))
+        .and_then(|texte| serde_json::from_str::<Claims>(&texte).ok())
         .and_then(|claims| {
             claims
                 .chatgpt_account_id

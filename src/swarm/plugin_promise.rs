@@ -97,6 +97,9 @@ pub struct Aisdk {
 
 pub struct Integration {
     pub transformation: DomaineEtReload,
+    /// Owned, like the other six fields: the host holds its connection behind an
+    /// `Arc` and hands a clone out. A borrow would tie this struct to the
+    /// lifetime of `&self` on the host, which is not `'static`.
     pub connexion: Arc<dyn ConnexionIntegration>,
 }
 
@@ -140,7 +143,7 @@ pub trait HoteEffet: Send + Sync {
     fn catalogue(&self) -> &dyn Domaine;
     fn commande(&self) -> &dyn Domaine;
     fn integration(&self) -> &dyn Domaine;
-    fn connexion_integration(&self) -> &dyn ConnexionIntegration;
+    fn connexion_integration(&self) -> Arc<dyn ConnexionIntegration>;
     fn plugin_ajoute(&self, adapte: Arc<dyn PluginEffet>) -> FuturPossede<()>;
     fn plugin_supprime(&self, id: &str) -> FuturPossede<()>;
     fn reference(&self) -> &dyn Domaine;
@@ -310,8 +313,8 @@ mod tests {
         fn integration(&self) -> &dyn Domaine {
             &*self.agent
         }
-        fn connexion_integration(&self) -> &dyn ConnexionIntegration {
-            &ConnexionFactice
+        fn connexion_integration(&self) -> Arc<dyn ConnexionIntegration> {
+            Arc::new(ConnexionFactice)
         }
         fn plugin_ajoute(&self, adapte: Arc<dyn PluginEffet>) -> FuturPossede<()> {
             Box::pin(async move {

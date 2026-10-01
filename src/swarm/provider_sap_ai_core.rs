@@ -199,10 +199,20 @@ pub fn extraire_service_key(options: &Value) -> Option<&str> {
 /// C'est le `??` de la source : `process.env.AICORE_SERVICE_KEY ??
 /// evt.options.serviceKey`. Un `??` ne remplace que `null`/`undefined`,
 /// donc une chaine vide dans l'environnement gagne et masque l'option.
-pub fn resoudre_service_key<'a>(options: &'a Value, env: &'a Environnement) -> Option<&'a str> {
+/// Resout la cle de service : l'environnement d'abord, l'option ensuite.
+///
+/// C'est le `??` de la source : `process.env.AICORE_SERVICE_KEY ??
+/// evt.options.serviceKey`. Un `??` ne remplace que `null`/`undefined`,
+/// donc une chaine vide dans l'environnement gagne et masque l'option.
+///
+/// Le retour est PROPRE, pas emprunte. Les deux branches originate de deux
+/// objets differents -- `env` et `options` -- et un `?` ne peut pas designer
+/// les deux. Emporter la chaine evite d immibiliser un des deux, ce qui
+/// empechait ensuite d ecrire `env.service_key = ...`.
+pub fn resoudre_service_key(options: &Value, env: &Environnement) -> Option<String> {
     match &env.service_key {
-        Some(cle) => Some(cle.as_str()),
-        None => extraire_service_key(options),
+        Some(cle) => Some(cle.clone()),
+        None => extraire_service_key(options).map(str::to_string),
     }
 }
 
@@ -267,17 +277,18 @@ where
     // pas deja une. Une chaine vide compte comme absente (`&&` sur une
     // chaine vide est falsy en JavaScript).
     let cle = resoudre_service_key(&event.options, env);
-    if let Some(cle) = cle {
-        if !cle.is_empty() && env.service_key.is_none() {
-            env.service_key = Some(cle.to_string());
-        }
+    // `Option<String>` is not `Copy`, so the value is borrowed for both the test
+    // and the hand-off rather than moved by the first one.
+    let cle_pleine = cle.as_ref().is_some_and(|cle| !cle.is_empty());
+    if cle_pleine && env.service_key.is_none() {
+        env.service_key = cle;
     }
 
     let chemin = resoudre_chemin_paquet(&event.package, installer(&event.package).as_deref())
         .ok_or_else(|| Erreur::PointEntreeManquant(event.package.clone()))?;
 
     // Une cle (resolue) impose les parametres d'environnement ; sinon `{}`.
-    let parametres = if cle.map(|cle| !cle.is_empty()).unwrap_or(false) {
+    let parametres = if cle_pleine {
         ParametresFabrique {
             deployment_id: env.deployment_id.clone(),
             resource_group: env.resource_group.clone(),
