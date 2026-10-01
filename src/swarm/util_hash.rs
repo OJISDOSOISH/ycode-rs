@@ -137,12 +137,39 @@ fn sha1_digest(entree: &[u8]) -> [u8; 20] {
         sortie[4 * i..4 * i + 4].copy_from_slice(&mot.to_be_bytes());
     }
     // TEMPORARY DIAGNOSTIC -- retirer avec le test homonyme.
+    //
+    // On imprime aussi l IV tel que le binaire le voit, et les cinq registres
+    // A..E apres la boucle. Si l IV est celle du SHA-1 et que A..E valent
+    // 72f480ed 6e9d9f84 999ae2f1 852dc41a ec052519 -- les valeurs qu'une
+    // reference calcule sur CE remplissage -- alors h ne peut pas valoir autre
+    // chose que da39a3ee. S il vaut 3485e413 quand meme, le binaire n execute
+    // pas ce fichier, et c est le build qui est en cause, pas le portage.
     #[cfg(test)]
     if entree.is_empty() {
         eprintln!(
-            "DIAG blocs={} w0={:08x} w1={:08x} w16={:08x} w79={:08x} h={:08x}{:08x}{:08x}{:08x}{:08x}",
+            "DIAG blocs={} w0={:08x} w1={:08x} w16={:08x} w79={:08x} \
+             IV={:08x}{:08x}{:08x}{:08x}{:08x} \
+             abcde={:08x}{:08x}{:08x}{:08x}{:08x} h={:08x}{:08x}{:08x}{:08x}{:08x}",
             donnees.chunks_exact(64).count(),
-            w[0], w[1], w[16], w[79], h[0], h[1], h[2], h[3], h[4]
+            w[0],
+            w[1],
+            w[16],
+            w[79],
+            0x6745_2301u32,
+            0xefcd_ab89u32,
+            0x98ba_dcfeu32,
+            0x1032_5476u32,
+            0xc3d2_e1f0u32,
+            a,
+            b,
+            c,
+            d,
+            e,
+            h[0],
+            h[1],
+            h[2],
+            h[3],
+            h[4]
         );
     }
     sortie
