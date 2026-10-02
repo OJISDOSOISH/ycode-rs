@@ -142,3 +142,4 @@ pub mod database_migration_20260410174513_workspace_name;
 pub mod database_migration_20260413175956_chief_energizer;
 pub mod database_migration_20260423070820_add_icon_url_override;
 pub mod database_migration_20260427172553_slow_nightmare;
+pub mod database_migration_20260428004200_add_session_path;
