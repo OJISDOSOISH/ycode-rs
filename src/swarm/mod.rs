@@ -139,3 +139,4 @@ pub mod provider_opencode;
 pub mod provider_sap_ai_core;
 pub mod provider_snowflake_cortex;
 pub mod database_migration_20260605003541_add_session_context_snapshot;
+pub mod database_migration_20260605042240_add_context_epoch_agent;
