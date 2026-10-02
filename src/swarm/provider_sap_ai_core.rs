@@ -284,7 +284,17 @@ where
         env.service_key = cle;
     }
 
-    let chemin = resoudre_chemin_paquet(&event.package, installer(&event.package).as_deref())
+    // Le ternaire de la source n'evalue `npm.add` que dans la branche opposee :
+    // `evt.package.startsWith("file://") ? evt.package : (npm.add(...)).entrypoint`
+    // laisse le resolveur INAPPELE pour une URL locale. Passer
+    // `installer(&event.package)` en argument evaluait l'effet de bord dans les
+    // deux cas ; il faut le garder dans la seule branche qui le demande.
+    let entree_npm = if event.package.starts_with("file://") {
+        None
+    } else {
+        installer(&event.package)
+    };
+    let chemin = resoudre_chemin_paquet(&event.package, entree_npm.as_deref())
         .ok_or_else(|| Erreur::PointEntreeManquant(event.package.clone()))?;
 
     // Une cle (resolue) impose les parametres d'environnement ; sinon `{}`.
@@ -640,15 +650,36 @@ mod tests {
     fn les_noms_de_champs_de_l_evenement_language_sont_exacts() {
         let mut event = evenement_language();
         event.language = Some(serde_json::json!("langage"));
+
+        // `serde_json` n'active pas `preserve_order` : les cles d'un objet
+        // `Value` sortent TRIEES, pas dans l'ordre du `json!` ci-dessous. La
+        // comparaison se fait donc sur des `Value`, dont l'egalite d'objet
+        // ignore l'ordre, et les noms sont verifies a part. Comparer des
+        // chaines verifierait un ordre que la bibliotheque ne garantit pas.
+        let json = serde_json::to_value(&event).unwrap();
         assert_eq!(
-            serde_json::to_string(&event).unwrap(),
-            r#"{"model":{"providerID":"sap-ai-core","api":{"id":"gpt-4o"}},"language":"langage"}"#
+            json,
+            serde_json::json!({
+                "model": { "providerID": "sap-ai-core", "api": { "id": "gpt-4o" } },
+                "language": "langage",
+            })
         );
+        assert_eq!(json.as_object().unwrap().len(), 2, "l evenement porte deux cles : {json:?}");
+        assert_eq!(json["model"]["providerID"], "sap-ai-core");
+        assert_eq!(json["model"]["api"]["id"], "gpt-4o");
+        assert!(
+            json["model"].get("package").is_none(),
+            "le modele ne porte que providerID et api : {json:?}"
+        );
+
         // Sans language : la cle est absente, comme un champ non pose en JS.
         let event = evenement_language();
+        let json = serde_json::to_value(&event).unwrap();
         assert_eq!(
-            serde_json::to_string(&event).unwrap(),
-            r#"{"model":{"providerID":"sap-ai-core","api":{"id":"gpt-4o"}}}"#
+            json,
+            serde_json::json!({ "model": { "providerID": "sap-ai-core", "api": { "id": "gpt-4o" } } })
         );
+        assert!(json.get("language").is_none(), "language absent du JSON : {json:?}");
+        assert_eq!(json.as_object().unwrap().len(), 1);
     }
 }

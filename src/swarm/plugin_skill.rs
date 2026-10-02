@@ -1110,8 +1110,14 @@ mod tests {
             );
         }
 
-        // Le texte parle bien du skill qu'il est, et pas d'un autre.
-        assert!(CONTENU.contains("`.opencode/skills/my-skill/SKILL.md`"));
+        // Le texte parle bien du skill qu'il est, et pas d'un autre. Le chemin
+        // est ecrit dans un BLOC DE CODE (lignes 167-169 du `.md`), donc sans
+        // les accents graves d'un code en ligne : le marquee avec eux n existe
+        // pas dans le fichier.
+        assert!(
+            CONTENU.contains("\n```\n.opencode/skills/my-skill/SKILL.md\n```\n"),
+            "l exemple de skill attendu a disparu du contenu incorpore"
+        );
     }
 
     #[test]
@@ -1141,31 +1147,42 @@ mod tests {
     fn aucun_index_octet_ne_peut_couper_un_caractere_du_contenu() {
         // Le risque annonce par le lot : `&CONTENU[..n]` coupe au milieu d'un
         // caractere non-ASCII et PANIQUE a l execution, alors que le fichier se
-        // compile. Ici les six positions de depart des caracteres larges sont
-        // des **faux** `is_char_boundary`, donc toute tranche calculee a ces
-        // index-la est un bug latent.
-        let departs: Vec<usize> = CONTENU
-            .char_indices()
-            .filter(|(_, c)| c.len_utf8() > 1)
-            .map(|(indexe, _)| indexe)
-            .collect();
+        // compile. Un **debut** de caractere est toujours une frontiere, c'est
+        // meme la garantie de `char_indices` : les index dangereux sont ceux
+        // qui tombent DANS un caractere, entre son premier octet et le
+        // precedent. Ce sont ces positions-la qui doivent etre des **faux**
+        // `is_char_boundary`.
+        let departs: Vec<(usize, char)> =
+            CONTENU.char_indices().filter(|(_, c)| c.len_utf8() > 1).collect();
         assert_eq!(departs.len(), 6, "les six caracteres larges ont disparu");
 
-        for (rang, &indexe) in departs.iter().enumerate() {
+        for (rang, &(indexe, caractere)) in departs.iter().enumerate() {
+            let largeur = caractere.len_utf8();
+            // Le depart reel est bien une frontiere, et la coupe fait bien
+            // trois octets.
             assert!(
-                !CONTENU.is_char_boundary(indexe),
-                "index {rang} ({indexe}) : une tranche y commencerait sur un caractere valide"
+                CONTENU.is_char_boundary(indexe),
+                "index {rang} ({indexe}) : le debut d un caractere est une frontiere"
             );
-            // Chaque depart reel est bien une frontiere, et la coupe fait bien
-            // 3 octets.
-            let largeur = CONTENU[indexe..].chars().next().map(char::len_utf8).unwrap();
+            assert_eq!(CONTENU[indexe..].chars().next(), Some(caractere));
             assert_eq!(largeur, 3, "seul un caractere de 3 octets est attendu ici");
+
+            // Les positions internes, elles, ne le sont pas : une tranche y
+            // commencerait sur un octet qui n'est pas un debut de caractere.
+            for decalage in 1..largeur {
+                let interne = indexe + decalage;
+                assert!(
+                    !CONTENU.is_char_boundary(interne),
+                    "index {rang} : {interne} est un octet interne de {indexe}, une tranche y commencerait au milieu du caractere"
+                );
+            }
         }
 
         // Et la seule operation portable sur cette chaine reste la copie
         // entiere, qui ne peut pas couper.
         let copie = CONTENU.to_string();
         assert_eq!(copie.chars().count(), CONTENU.chars().count());
+        assert_eq!(copie.as_bytes(), CONTENU.as_bytes());
     }
 
     #[test]

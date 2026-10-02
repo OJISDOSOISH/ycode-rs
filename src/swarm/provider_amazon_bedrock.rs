@@ -450,17 +450,19 @@ impl BedrockSdkEvent {
 ///
 /// Le TypeScript lit `process.env` directement ; ici l'instantane est fourni
 /// par l'hote (voir [`AwsEnv::capture`]), ce qui garde la decision pure et
-/// testable.
+/// testable. Comme en JavaScript, ou une variable non definie n'est pas une
+/// cle d'objet, chaque `Option` a `None` est `skip_serializing_if` : la cle
+/// disparait du JSON au lieu de valoir `null`.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct AwsEnv {
     /// `process.env.AWS_PROFILE`.
-    #[serde(rename = "profile")]
+    #[serde(rename = "profile", skip_serializing_if = "Option::is_none")]
     pub profile: Option<String>,
     /// `process.env.AWS_REGION`.
-    #[serde(rename = "region")]
+    #[serde(rename = "region", skip_serializing_if = "Option::is_none")]
     pub region: Option<String>,
     /// `process.env.AWS_BEARER_TOKEN_BEDROCK`.
-    #[serde(rename = "bearerToken")]
+    #[serde(rename = "bearerToken", skip_serializing_if = "Option::is_none")]
     pub bearer_token: Option<String>,
     /// `Boolean(AWS_CONTAINER_CREDENTIALS_RELATIVE_URI ||
     /// AWS_CONTAINER_CREDENTIALS_FULL_URI)`.
@@ -731,6 +733,10 @@ mod tests {
     fn un_endpoint_non_chaine_n_est_pas_deplace_et_n_est_pas_supprime() {
         // Le TS teste `typeof provider.request.body.endpoint !== "string"` :
         // nombre, objet, null ou cle absente laissent le fournisseur intact.
+        // Cette garde est A L'INTERIEUR du `update`, que la source appelle sur
+        // tout fournisseur deja filtre : la liste des touches nomme donc le
+        // fournisseur filtre, sans dire s'il a bouge. Ce qui compte, et ce que
+        // la source garantit, c'est que rien n'a bouge.
         for valeur in [json!(42), json!(null), json!({ "url": "x" })] {
             let mut provider = fournisseur_bedrock();
             provider.request.body.insert(ENDPOINT_BODY_KEY.to_string(), valeur.clone());
@@ -738,9 +744,19 @@ mod tests {
 
             let touches = BedrockPlugin::transform(&mut draft);
 
-            assert!(touches.is_empty(), "la valeur {:?} ne doit pas declencher le deplacement", valeur);
+            assert_eq!(touches, vec!["bedrock".to_string()], "le fournisseur filtre est nomme");
             let intact = draft.get("bedrock").unwrap();
-            assert_eq!(intact.request.body.get(ENDPOINT_BODY_KEY), Some(&valeur));
+            assert_eq!(
+                intact.request.body.get(ENDPOINT_BODY_KEY),
+                Some(&valeur),
+                "un endpoint present mais non chaine reste en place, valeur inchangee"
+            );
+            match &intact.api {
+                BedrockApi::Aisdk { url, .. } => {
+                    assert_eq!(url.as_deref(), None, "aucune URL n est ecrite")
+                }
+                autre => panic!("l'api doit rester aisdk, pas {:?}", autre),
+            }
         }
     }
 
@@ -750,7 +766,16 @@ mod tests {
 
         let touches = BedrockPlugin::transform(&mut draft);
 
-        assert!(touches.is_empty());
+        // Comme dans le test du dessus : la source appelle `update` sur le
+        // fournisseur filtre, et c'est la garde interne qui lit une cle absente
+        // et rend la main. Aucune ecriture, donc un catalogue intact.
+        assert_eq!(touches, vec!["bedrock".to_string()]);
+        let intact = draft.get("bedrock").unwrap();
+        assert!(intact.request.body.is_empty(), "le corps reste vide");
+        match &intact.api {
+            BedrockApi::Aisdk { url, .. } => assert_eq!(url.as_deref(), None, "aucune URL n est ecrite"),
+            autre => panic!("l'api doit rester aisdk, pas {:?}", autre),
+        }
     }
 
     #[test]
