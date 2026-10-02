@@ -340,10 +340,19 @@ mod tests {
         let mut corps: Value =
             serde_json::from_str(r#"{"model":"claude","max_tokens":1024,"messages":[]}"#).unwrap();
         assert!(reecrit_le_corps(&mut corps));
+        // Comparaison de `Value`, pas de chaine : `serde_json` est sans
+        // `preserve_order`, donc sa `Map` trie les cles et l'ordre du JSON
+        // ecrit par la source n'est pas observable ici. Seule la
+        // correspondance des noms de cles est une propriete de la source.
         assert_eq!(
-            serde_json::to_string(&corps).unwrap(),
-            r#"{"model":"claude","messages":[],"max_completion_tokens":1024}"#
+            corps,
+            serde_json::json!({
+                "model": "claude",
+                "messages": [],
+                "max_completion_tokens": 1024
+            })
         );
+        assert!(corps.get("max_tokens").is_none(), "l'ancienne cle doit disparaitre");
     }
 
     #[test]

@@ -235,13 +235,21 @@ mod tests {
         }
 
         /// Emet un evenement a tous les callbacks enregistres.
+        ///
+        /// Les callbacks sont pris puis remis : emettre ne doit pas
+        /// desinstaller le crochet, sinon un second evenement ne passerait par
+        /// aucun. `std::mem::take` sort les boites du `Vec` sans les cloner,
+        /// ce qui serait impossible pour une `Box<dyn Fn>`.
         fn emettre(&self, evt: &mut SdkEvent) {
-            // `pop` donne la valeur posee, sans avoir a cloner une boite de
-            // closure, ce qui serait impossible.
-            let crochet = self.crochets.lock().unwrap().pop();
-            if let Some(crochet) = crochet {
+            let crochets = {
+                let mut garde = self.crochets.lock().unwrap();
+                std::mem::take(&mut *garde)
+            };
+            for crochet in crochets.iter() {
                 crochet(evt);
             }
+            let mut garde = self.crochets.lock().unwrap();
+            garde.extend(crochets);
         }
     }
 
