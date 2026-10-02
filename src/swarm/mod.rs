@@ -144,3 +144,4 @@ pub mod database_migration_20260423070820_add_icon_url_override;
 pub mod database_migration_20260427172553_slow_nightmare;
 pub mod database_migration_20260428004200_add_session_path;
 pub mod config_attachments;
+pub mod session_error;
