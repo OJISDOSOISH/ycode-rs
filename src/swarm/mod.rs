@@ -146,3 +146,4 @@ pub mod database_migration_20260323234822_events;
 pub mod config_attachments;
 pub mod flag_flag;
 pub mod effect_service_use;
+pub mod tool_read;
