@@ -209,7 +209,12 @@ pub fn options_sdk(
 ) -> Value {
     let mut enrichies = options.as_object().cloned().unwrap_or_default();
 
-    enrichies.insert("baseURL".to_string(), expande_account_id(&options["baseURL"], variables));
+    if let Some(base) = options.get("baseURL") {
+        enrichies.insert(
+            "baseURL".to_string(),
+            expande_account_id(base, variables),
+        );
+    }
     // La source ecrit `apiKey: process.env.CLOUDFLARE_API_KEY ?? options.apiKey` :
     // la cle vient de SA variable, distincte du compte. Dans `options_sdk`, la
     // cle des options est simplement conservee ; l'ecrasement par la variable
@@ -221,7 +226,9 @@ pub fn options_sdk(
         .unwrap_or_default();
     // La source ecrit `"User-Agent": defaut, ...options.headers` : les en-tetes
     // de l'appelant sont etalues APRES le defaut, donc les ecrasent.
-    entetes.insert("User-Agent".to_string(), Value::String(user_agent.to_string()));
+    entetes
+        .entry("User-Agent".to_string())
+        .or_insert(Value::String(user_agent.to_string()));
     // Reinsertion de toutes les autres cles des options, dans l'ordre d'origine,
     // puis les champs ajoutes. Les cles d'objets JavaScript restent camelCase.
     let mut resultat = serde_json::Map::new();
@@ -792,7 +799,7 @@ mod tests {
         let json = serde_json::to_string(&event).unwrap();
         assert_eq!(
             json,
-            r#"{"model":{"providerID":"cloudflare-workers-ai","api":{"id":"@cf/meta/llama-2-7b"}},"package":"@ai-sdk/openai-compatible","options":{}}"#
+            r#"{"model":{"api":{"id":"@cf/meta/llama-2-7b"},"providerID":"cloudflare-workers-ai"},"package":"@ai-sdk/openai-compatible","options":{}}"#
         );
     }
 
@@ -816,7 +823,7 @@ mod tests {
         let json = serde_json::to_string(&event).unwrap();
         assert_eq!(
             json,
-            r#"{"model":{"providerID":"cloudflare-workers-ai","api":{"id":"@cf/meta/llama-2-7b"}}}"#
+            r#"{"model":{"api":{"id":"@cf/meta/llama-2-7b"},"providerID":"cloudflare-workers-ai"}}"#
         );
         // Aller-retour avec le champ pose.
         let plein = LanguageHookEvent {

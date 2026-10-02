@@ -408,8 +408,8 @@ mod tests {
         // reste vivant dans la liste de crochets.
         let module = Rc::new(FauxModule::default());
         let pour_le_rappel = Rc::clone(&module);
-        let passe = Cell::new(false);
-        let temoin = passe.clone();
+        let passe = Rc::new(Cell::new(false));
+        let temoin = Rc::clone(&passe);
 
         let mut ctx = AisdkHooks {
             sdk: Vec::new(),
