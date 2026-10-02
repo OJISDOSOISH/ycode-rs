@@ -632,9 +632,14 @@ mod tests {
     #[test]
     fn le_crochet_ecrit_la_decision_dans_l_evenement() {
         let mut event = evenement_langage("gpt-5");
-        let choix = on_language_event(&mut event, |api_id: &str| json!({ "api": api_id })).unwrap();
+        // La fabrique passee ici tient lieu de `evt.sdk.languageModel`, que la
+        // source n'appelle que sur sa premiere branche. Ici c'est la branche
+        // Responses qui part : la source ecrit `evt.sdk.responses(...)`, que le
+        // portage represente par `null` puisque l'appel n'a pas de forme JSON.
+        // La fabrique ne doit donc pas etre appelee du tout.
+        let choix = on_language_event(&mut event, |_api_id: &str| json!("fabrique languageModel")).unwrap();
         assert_eq!(choix, LanguageChoice::Responses);
-        assert_eq!(event.language, Some(json!({ "api": "gpt-5" })));
+        assert_eq!(event.language, Some(Value::Null));
     }
 
     #[test]

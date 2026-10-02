@@ -408,8 +408,11 @@ mod tests {
         // reste vivant dans la liste de crochets.
         let module = Rc::new(FauxModule::default());
         let pour_le_rappel = Rc::clone(&module);
-        let passe = Cell::new(false);
-        let temoin = passe.clone();
+        // Le temoin doit etre le MEME drapeau que celui lu apres la boucle :
+        // `Cell<bool>` se clone par COPIE, donc un clone ecrit dans une autre
+        // cellule et `passe` resterait false meme quand le rappel s'execute.
+        let passe = Rc::new(Cell::new(false));
+        let temoin = Rc::clone(&passe);
 
         let mut ctx = AisdkHooks {
             sdk: Vec::new(),

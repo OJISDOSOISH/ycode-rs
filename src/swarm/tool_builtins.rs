@@ -810,37 +810,30 @@ mod tests {
         // The write direction of the field-name trap. The three keys are
         // `name`, `layer` and `deps`: all lowercase, no capitals, no
         // underscores, no hyphens, and exactly those.
-        let json = serde_json::to_value(node_spec()).expect("serialisation cannot fail");
-        let objet = json.as_object().expect("the spec is a JSON object");
-
-        let cles: Vec<&str> = objet.keys().map(|cle| cle.as_str()).collect();
-        assert_eq!(cles, vec!["name", "layer", "deps"], "the key set is exact and in order");
-
-        assert_eq!(objet.get("name"), Some(&serde_json::json!("built-in-tools")));
-        assert_eq!(objet.get("layer"), Some(&serde_json::json!("Layer.empty")));
+        //
+        // `to_string`, not `to_value`: `serde_json` is not built with the
+        // `preserve_order` feature here (Cargo.toml line 8), so a `Value` map is
+        // a `BTreeMap` and its keys come back sorted -- `deps`, `layer`, `name`
+        // -- whatever the struct declares. Serialising the struct emits the
+        // declaration order instead, which is the order of the source's object
+        // literal, and that is the only write direction where the key order is
+        // observable. `deps` is a list in both directions, and a list is never
+        // sorted, so the dependency order is pinned either way.
+        let json = serde_json::to_string(&node_spec()).expect("serialisation cannot fail");
         assert_eq!(
-            objet.get("deps"),
-            Some(&serde_json::json!([
-                "tool/apply-patch",
-                "tool/bash",
-                "tool/edit",
-                "tool/glob",
-                "tool/grep",
-                "tool/question",
-                "tool/read",
-                "tool/skill",
-                "tool/todowrite",
-                "tool/webfetch",
-                "tool/websearch",
-                "tool/write",
-            ])),
-            "the array order is part of the value"
+            json,
+            concat!(
+                r#"{"name":"built-in-tools","layer":"Layer.empty","deps":["#,
+                r#""tool/apply-patch","tool/bash","tool/edit","tool/glob","tool/grep","tool/question","#,
+                r#""tool/read","tool/skill","tool/todowrite","tool/webfetch","tool/websearch","tool/write"]}"#
+            ),
+            "the key names, the key order and the dependency order are all part of the value"
         );
 
         // Nothing anywhere carries a capital, an underscore or a hyphen in a
         // key: the source has no `projectID` to rename, and this is what
         // proves the port did not invent one.
-        for cle in cles {
+        for cle in ["name", "layer", "deps"] {
             assert!(!cle.chars().any(|c| c.is_ascii_uppercase()), "unexpected capital in {cle:?}");
             assert!(!cle.contains('_'), "unexpected underscore in {cle:?}");
             assert!(!cle.contains('-'), "unexpected hyphen in {cle:?}");
