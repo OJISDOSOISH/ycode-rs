@@ -755,7 +755,9 @@ mod tests {
         )
         .unwrap();
         assert_eq!(parsed.provider, "");
-        assert!(!parsed.provider.is_empty(), "still a value, not an absence");
+        // `provider: string` has no truthiness filter: the empty string is the
+        // value that reaches the model, so it arrives EMPTY rather than absent.
+        assert!(parsed.provider.is_empty(), "still a value, not an absence");
         let value = serde_json::to_value(parsed).unwrap();
         assert_eq!(value, json!({ "provider": "" }));
     }
@@ -764,14 +766,24 @@ mod tests {
     fn an_absent_prefix_list_and_an_empty_one_stay_distinct() {
         let absent: Option<Vec<String>> = None;
         let empty: Option<Vec<String>> = Some(Vec::new());
-        assert_ne!(
-            serde_json::to_value(&absent).unwrap(),
-            json!(null),
+        // `skip_serializing_if` is a FIELD attribute: it fires when the struct
+        // is serialised, never when a bare `Option` is, and a bare `None`
+        // serialises to `null` by definition. The absent/empty distinction is
+        // therefore read off `OpenAiConfig`, where the field actually lives.
+        let sans_prefixes =
+            OpenAiConfig::new("copilot", Box::new(sample_url), Box::new(empty_headers));
+        let avec_prefixes =
+            OpenAiConfig::new("copilot", Box::new(sample_url), Box::new(empty_headers))
+                .with_file_id_prefixes(Vec::<String>::new());
+        let json_absent = serde_json::to_value(&sans_prefixes).unwrap();
+        let json_vide = serde_json::to_value(&avec_prefixes).unwrap();
+        assert!(
+            json_absent.get("fileIdPrefixes").is_none(),
             "None is skipped, it does not become a null on the wire"
         );
-        assert_eq!(serde_json::to_value(&empty).unwrap(), json!([]));
+        assert_eq!(json_vide["fileIdPrefixes"], json!([]));
 
-        assert!(!is_file_id("file-abc", None::<&[String]>.as_deref()));
+        assert!(!is_file_id("file-abc", absent.as_deref()));
         assert!(!is_file_id("file-abc", empty.as_deref()));
         assert!(is_file_id("file-abc", Some(&[String::from("file-")])));
 
@@ -805,7 +817,11 @@ mod tests {
         let data = "fichier-é-1";
         assert!(is_file_id(data, Some(&[String::from("fichier-é")])));
         assert!(is_file_id(data, Some(&[String::from("fichier")])));
-        assert!(!is_file_id(data, Some(&[String::from("fichie")])));
+        // "fichie" is the first six CHARACTERS of the identifier and also its
+        // first six BYTES, so `data.startsWith("fichie")` is true. A prefix
+        // that would split a character cannot be spelled in a Rust `String`
+        // at all; the negative cases below are prefixes that differ instead.
+        assert!(is_file_id(data, Some(&[String::from("fichie")])));
         assert!(!is_file_id(data, Some(&[String::from("fichier-é-2")])));
 
         let han = "\u{6587}\u{4ef6}-abc";

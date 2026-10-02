@@ -207,21 +207,20 @@ pub fn options_sdk(
     variables: Option<&str>,
     user_agent: &str,
 ) -> Value {
-    let mut enrichies = options.as_object().cloned().unwrap_or_default();
-
-    enrichies.insert("baseURL".to_string(), expande_account_id(&options["baseURL"], variables));
     // La source ecrit `apiKey: process.env.CLOUDFLARE_API_KEY ?? options.apiKey` :
     // la cle vient de SA variable, distincte du compte. Dans `options_sdk`, la
     // cle des options est simplement conservee ; l'ecrasement par la variable
     // est fait par l'appelant (`on_sdk_event`), qui connait l'environnement.
-    let mut entetes = options
-        .get("headers")
-        .and_then(|h| h.as_object())
-        .cloned()
-        .unwrap_or_default();
-    // La source ecrit `"User-Agent": defaut, ...options.headers` : les en-tetes
-    // de l'appelant sont etalues APRES le defaut, donc les ecrasent.
+    let mut entetes = serde_json::Map::new();
+    // La source ecrit `"User-Agent": defaut, ...options.headers` : le defaut est
+    // pose EN PREMIER, puis les en-tetes de l'appelant sont etales par-dessus.
+    // L'ordre compte donc : insere apres, le defaut ecraserait l'appelant.
     entetes.insert("User-Agent".to_string(), Value::String(user_agent.to_string()));
+    if let Some(origine) = options.get("headers").and_then(|h| h.as_object()) {
+        for (cle, valeur) in origine {
+            entetes.insert(cle.clone(), valeur.clone());
+        }
+    }
     // Reinsertion de toutes les autres cles des options, dans l'ordre d'origine,
     // puis les champs ajoutes. Les cles d'objets JavaScript restent camelCase.
     let mut resultat = serde_json::Map::new();
@@ -231,10 +230,18 @@ pub fn options_sdk(
         }
         resultat.insert(cle, valeur);
     }
-    if let Some(base) = enrichies.get("baseURL") {
-        resultat.insert("baseURL".to_string(), base.clone());
+    // La source ecrit `baseURL: expandAccountId(options.baseURL)` : la cle est
+    // TOUJOURS posee, mais avec la valeur `undefined` quand elle manque dans les
+    // options. `undefined` n'a pas de forme JSON et `JSON.stringify` le retire,
+    // donc la cle disparait du fil au lieu de devenir `null`. Un `null` explicite
+    // dans les options, lui, est conserve tel quel.
+    if let Some(base) = options.get("baseURL") {
+        resultat.insert(
+            "baseURL".to_string(),
+            expande_account_id(base, variables),
+        );
     }
-    if let Some(api_key) = enrichies.get("apiKey") {
+    if let Some(api_key) = options.get("apiKey") {
         resultat.insert("apiKey".to_string(), api_key.clone());
     }
     resultat.insert("headers".to_string(), Value::Object(entetes));
@@ -790,10 +797,19 @@ mod tests {
     fn les_noms_de_champs_de_l_evenement_sdk_sont_exacts() {
         let event = evenement();
         let json = serde_json::to_string(&event).unwrap();
+        // `serde_json` n'active pas `preserve_order` : un `Map` est un
+        // `BTreeMap`, donc les cles de `modele()` sortent TRIEES, `api` avant
+        // `providerID`. Seuls les NOMS sont figes ici, pas leur ordre d'ecriture.
         assert_eq!(
             json,
-            r#"{"model":{"providerID":"cloudflare-workers-ai","api":{"id":"@cf/meta/llama-2-7b"}},"package":"@ai-sdk/openai-compatible","options":{}}"#
+            r#"{"model":{"api":{"id":"@cf/meta/llama-2-7b"},"providerID":"cloudflare-workers-ai"},"package":"@ai-sdk/openai-compatible","options":{}}"#
         );
+        let relu: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(relu["model"]["providerID"], "cloudflare-workers-ai");
+        assert_eq!(relu["model"]["api"]["id"], "@cf/meta/llama-2-7b");
+        assert_eq!(relu["package"], PACKAGE);
+        assert_eq!(relu["options"], serde_json::json!({}));
+        assert!(relu.get("sdk").is_none(), "sdk absent tant que rien ne l'a pose");
     }
 
     #[test]
@@ -814,9 +830,10 @@ mod tests {
             language: None,
         };
         let json = serde_json::to_string(&event).unwrap();
+        // Meme tri de cles que ci-dessus : `api` avant `providerID`.
         assert_eq!(
             json,
-            r#"{"model":{"providerID":"cloudflare-workers-ai","api":{"id":"@cf/meta/llama-2-7b"}}}"#
+            r#"{"model":{"api":{"id":"@cf/meta/llama-2-7b"},"providerID":"cloudflare-workers-ai"}}"#
         );
         // Aller-retour avec le champ pose.
         let plein = LanguageHookEvent {
