@@ -141,3 +141,4 @@ pub mod provider_snowflake_cortex;
 pub mod database_migration_20260622142730_simplify_session_context_epoch;
 pub mod database_migration_20260622170816_reset_v2_session_state;
 pub mod database_migration_20260622202450_simplify_session_input;
+pub mod data_migration_sql;
