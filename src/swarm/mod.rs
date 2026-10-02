@@ -139,3 +139,4 @@ pub mod provider_opencode;
 pub mod provider_sap_ai_core;
 pub mod provider_snowflake_cortex;
 pub mod database_migration_20260603001617_session_message_projection_indexes;
+pub mod database_migration_20260603040000_session_message_projection_order;
