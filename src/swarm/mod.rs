@@ -142,3 +142,4 @@ pub mod database_migration_20260511173437_session_metadata;
 pub mod database_migration_20260601010001_normalize_storage_paths;
 pub mod database_migration_20260601202201_amazing_prowler;
 pub mod database_migration_20260602002951_lowly_union_jack;
+pub mod database_migration_20260602182828_add_project_directories;
