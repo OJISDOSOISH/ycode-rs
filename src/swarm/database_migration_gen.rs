@@ -86,7 +86,10 @@ pub fn id_migration(position: usize) -> Option<&'static str> {
 
 /// La position d'un identifiant dans l'ordre d'application, ou `None`.
 pub fn position_migration(id: &str) -> Option<usize> {
-    MIGRATION_IDS.iter().position(|connu| *connu == id)
+    MIGRATION_IDS.iter().position(|connu| {
+        let connu: &str = connu;
+        connu == id
+    })
 }
 
 /// Dit si un identifiant a la forme `<14 chiffres>_<nom>` du registre.
