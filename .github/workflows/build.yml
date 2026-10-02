@@ -39,6 +39,71 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Sonde d'integrite, AVANT toute compilation.
+      #
+      # Motif : un hash SHA-1 de port donne `3485e413...` sur l'entree vide au
+      # lieu de `da39a3ee...`, alors que le code source est le SHA-1 canonique
+      # caractere par caractere et que 262 144 variantes de la fonction de tour
+      # ont ete ecartees. Une contradiction entre un code lisible et un resultat
+      # d'execution ne se tranche pas en relisant le code : elle se tranche en
+      # comparant ce que la machine voit a ce que le depot contient.
+      #
+      # Cette etape verifie deux choses, toutes deux observables, aucune ne
+      # compile rien :
+      #   1. le fichier que cargo va compiler est bien celui du commit, pas une
+      #      version venue d'ailleurs - le symptome que nous avons deja subi en
+      #      local, ou des modifications non commitees changeaient le binaire
+      #      sans que personne ne le sache ;
+      #   2. les trois implementations de SHA-1 disponibles sur cette machine
+      #      concordent. Si elles divergeaient, c'est la machine qui ment, et
+      #      aucun resultat de test du jour n'est probant.
+      - name: Sonde d'integrite
+        shell: bash
+        run: |
+          set -u
+          echo "--- fichier source, blob du commit contre fichier sur disque ---"
+          for f in src/swarm/util_hash.rs src/core/fs_util.rs; do
+            if git cat-file -e "HEAD:$f" 2>/dev/null; then
+              a=$(git show "HEAD:$f" | sha256sum | cut -d' ' -f1)
+              b=$(sha256sum "$f" | cut -d' ' -f1)
+              if [ "$a" = "$b" ]; then
+                echo "  $f  IDENTIQUE  $a"
+              else
+                echo "  $f  DIVERGENT"
+                echo "    commit : $a"
+                echo "    disque : $b"
+                echo "    ERREUR: cargo ne compilera pas ce que le commit contient."
+                exit 1
+              fi
+            else
+              echo "  $f  absent du commit"
+            fi
+          done
+
+          echo "--- SHA-1 de la chaine vide, trois implementations ---"
+          ref="da39a3ee5e6b4b0d3255bfef95601890afd80709"
+          got=""
+          if command -v node >/dev/null 2>&1; then
+            n=$(node -e 'process.stdout.write(require("crypto").createHash("sha1").update("").digest("hex"))')
+            echo "  node    $n"; [ -z "$got" ] && got="$n"
+          fi
+          if command -v python >/dev/null 2>&1 || command -v python3 >/dev/null 2>&1; then
+            py=$(python -c 'import hashlib,sys;sys.stdout.write(hashlib.sha1(b"").hexdigest())' 2>/dev/null \
+              || python3 -c 'import hashlib,sys;sys.stdout.write(hashlib.sha1(b"").hexdigest())')
+            echo "  python  $py"
+            if [ -n "$got" ] && [ "$py" != "$got" ]; then
+              echo "    ERREUR: node et python divergent sur SHA-1."
+              exit 1
+            fi
+            [ -z "$got" ] && got="$py"
+          fi
+          echo "  attendu $ref"
+          if [ -n "$got" ] && [ "$got" != "$ref" ]; then
+            echo "    ERREUR: la machine ne calcule pas le SHA-1 de reference."
+            exit 1
+          fi
+          echo "  OK"
+
       - name: Installer Rust
         uses: dtolnay/rust-toolchain@stable
         with:

@@ -97,6 +97,12 @@ fn sha1_digest(entree: &[u8]) -> [u8; 20] {
     // venait de `h`.
     #[cfg(test)]
     let iv_vue = [h[0], h[1], h[2], h[3], h[4]];
+    // Les deux variables de diagnostic se declarent ICI, avant la boucle, et non
+    // dedans. Declarees dedans, elles sont hors de portee au eprintln qui suit la
+    // boucle : c est ce qui a casse la compilation deux fois de suite dans ce
+    // fichier, une fois pour a..e, puis une fois pour cette copie.
+    #[cfg(test)]
+    let mut derniers = (0u32, 0u32, 0u32, 0u32, 0u32);
 
     for bloc in donnees.chunks_exact(64) {
         lire_bloc(bloc, &mut w);
@@ -105,8 +111,6 @@ fn sha1_digest(entree: &[u8]) -> [u8; 20] {
         }
 
         let (mut a, mut b, mut c, mut d, mut e) = (h[0], h[1], h[2], h[3], h[4]);
-        #[cfg(test)]
-        let mut derniers = (0u32, 0u32, 0u32, 0u32, 0u32);
 
         for i in 0..80 {
             let (f, k) = if i < 20 {
@@ -276,6 +280,67 @@ fn sha256_digest(entree: &[u8]) -> [u8; 32] {
 #[cfg(test)]
 mod tests {
     use super::{completer, fast, sha1_digest, sha256, vers_hex};
+
+    /// TEST DECISIF -- a supprimer apres identification.
+    ///
+    /// Le code de `sha1_digest` est, caractere par caractere, le SHA-1
+    /// canonique : le remplissage est exact, le calendrier de messages est
+    /// identique octet pour octet a une reference, et 262 144 variantes de la
+    /// fonction de tour, de l IV et des K ne reproduisent pas le condensat rendu.
+    ///
+    /// Reste une hypothese qui remet en cause l INSTRUMENT et non l objet : le
+    /// runner n executerait pas le fichier du depot. On la teste sans compiler
+    /// en local, en interrogeant deux implementations de reference de la MEME
+    /// machine, depuis l etape de test qui tourne deja.
+    ///
+    /// Les deux references doivent donner da39a3ee. Si elles la donnaient aussi, le
+    /// binaire n est pas en cause et le defaut est dans le code. Si elles ne la
+    /// donnent pas, la machine substitue, et tous les resultats du jour ont ete
+    /// mesures sur autre chose que le depot.
+    ///
+    /// PANIQUE volontairement : la CI n affiche la sortie que d un test en echec.
+    #[test]
+    fn le_runner_calcule_til_le_meme_sha1_que_node_et_python() {
+        fn condensat(programme: &str) -> String {
+            std::process::Command::new(programme)
+                .arg("-e")
+                .arg(
+                    "const c=require('crypto');console.log(c.createHash('sha1').update('').digest('hex'))",
+                )
+                .output()
+                .ok()
+                .and_then(|o| {
+                    if o.status.success() {
+                        Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_else(|| "<indisponible>".to_string())
+        }
+
+        let node = condensat("node");
+        let python = std::process::Command::new("python")
+            .arg("-c")
+            .arg("import hashlib;print(hashlib.sha1(b'').hexdigest())")
+            .output()
+            .ok()
+            .and_then(|o| {
+                if o.status.success() {
+                    Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| "<indisponible>".to_string());
+
+        panic!(
+            "node={} python={} NOTRE_CODE={} ATTENDU=da39a3ee5e6b4b0d3255bfef95601890afd80709",
+            node,
+            python,
+            fast("")
+        );
+    }
 
     /// TEMPORARY DIAGNOSTIC -- a supprimer apres identification.
     ///
