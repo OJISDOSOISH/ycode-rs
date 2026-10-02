@@ -337,17 +337,22 @@ mod tests {
                 effet
             );
         }
-        for effet in ["allow", "deny"] {
+        // `Schema.Literals(["allow", "deny"])`: les DEUX chaines sont acceptees,
+        // et chacune donne SA variante. Ecrire `Effect::Allow` pour les deux
+        // tours ferait echouer le second, sans rien prouver de faux sur le
+        // decodeur : c'est le test qui etait faux, pas l'enumeration.
+        for (effet, attendu) in [("allow", Effect::Allow), ("deny", Effect::Deny)] {
             let json = format!(
-                "{{\"action\":\"provider.use\",\"effect\":\"{},\"resource\":\"*\"}}",
+                "{{\"action\":\"provider.use\",\"effect\":\"{}\",\"resource\":\"*\"}}",
                 effet
             );
             assert_eq!(
                 serde_json::from_str::<Policy>(&json).unwrap().effect,
-                Effect::Allow,
-                ""
+                attendu,
+                "effet mal lu pour la chaine {}",
+                effet
             );
-            // le second tour doit donner Deny : on verifie la chaine exacte
+            // le second tour donne donc bien `Deny`, avec la chaine exacte
             assert!(json.contains(effet));
         }
     }

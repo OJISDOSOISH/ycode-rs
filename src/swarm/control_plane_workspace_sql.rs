@@ -848,15 +848,29 @@ mod tests {
         // La colonne est en `mode: "json"` mais **sans** `$type`, et le contrat
         // de l'application est `Schema.Unknown`. Un `struct` ici inventerait une
         // contrainte que ni le DDL ni l'ORM ne portent.
-        for brut in [
-            r#"{"url":"https://exemple","port":8080}"#,
-            r#"["a","b"]"#,
-            r#""chaine""#,
-            "42",
-            "true",
+        //
+        // Attention : `serde_json` est ici sans la feature `preserve_order`
+        // (`Cargo.toml` ne la demande pas), donc la `Map` d'un objet est un
+        // `BTreeMap` et `to_string` rend les cles TRIEES. L'aller-retour est donc
+        // stable au niveau de la VALEUR pour toute forme, mais stable au niveau
+        // du TEXTE seulement quand la forme ecrite est deja canonique. C'est le
+        // couple `(entree, sortie)` qui verifie les deux, sans exiger de
+        // `preserve_order`.
+        for (brut, attendu) in [
+            (r#"{"url":"https://exemple","port":8080}"#, r#"{"port":8080,"url":"https://exemple"}"#),
+            (r#"["a","b"]"#, r#"["a","b"]"#),
+            (r#""chaine""#, r#""chaine""#),
+            ("42", "42"),
+            ("true", "true"),
         ] {
             let relu = decode_extra(brut).unwrap_or_else(|e| panic!("{brut} aurait du etre accepte : {e}"));
-            assert_eq!(encode_extra(&relu).unwrap(), brut, "l aller-retour doit etre stable");
+            assert_eq!(encode_extra(&relu).unwrap(), attendu, "forme inattendue pour {brut}");
+            // La valeur, elle, est toujours rendue a l'identique.
+            assert_eq!(
+                decode_extra(&encode_extra(&relu).unwrap()).unwrap(),
+                relu,
+                "l aller-retour doit etre stable en valeur pour {brut}"
+            );
         }
     }
 

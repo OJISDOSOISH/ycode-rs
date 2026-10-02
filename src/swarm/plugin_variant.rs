@@ -1294,13 +1294,22 @@ mod tests {
         // and the other must not move. That is what the rest of the test does.
         assert_eq!(first, second);
 
+        // `generate` fills `body` with `reasoning_effort`, so a generated
+        // variant NEVER has an empty body: "the result did not move" cannot be
+        // spelled `body.is_empty()`.
+        assert!(!first[0].body.is_empty(), "every generated variant carries reasoning_effort");
+
         let mut mutated = generate(&info);
         mutated[0].body.insert("x".to_string(), json!(1));
-        assert!(
-            first[0].body.is_empty(),
+        // L'independance se mesure sur la VALEUR : le premier resultat doit
+        // rester egal au second apres la mutation du troisieme.
+        assert_eq!(
+            first,
+            second,
             "the second call's result was written through"
         );
         assert!(info.variants.is_empty());
         assert!(!first[0].body.contains_key("x"));
+        assert!(!second[0].body.contains_key("x"));
     }
 }

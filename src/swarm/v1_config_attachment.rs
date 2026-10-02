@@ -409,8 +409,12 @@ mod tests {
         // Second falsy du fichier, numerique : `0` disparaitrait aussi sous un
         // ternaire, alors que la famille `??` le conserve. Les trois
         // `PositiveInt` sont concernes exactement comme `auto_resize`.
+        // `filter` garde ce que le predicat accepte, donc un filtre de
+        // VERACITE s'ecrit `*v != 0` : c'est `0` qui est a effacer. Le predicat
+        // inverse (`*v == 0`) garderait `0` et ne modelerait rien du tout.
         let zero = Some(0u64);
-        assert_eq!(zero.filter(|v| *v == 0), None);
+        assert_eq!(zero.filter(|v| *v != 0), None, "0 est falsy, il disparait");
+        assert_eq!(zero.filter(|v| *v == 0), Some(0), "un filtre d appartenance garderait 0");
         assert_eq!(survit_si_null(zero), Some(0));
     }
 

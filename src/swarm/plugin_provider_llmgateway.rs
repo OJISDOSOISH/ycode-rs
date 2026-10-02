@@ -527,16 +527,28 @@ mod tests {
             "le champ integrationID ne doit pas etre modifie"
         );
 
-        // Cas inverse : c'est `integrationID` qui est enregistre, pas l'id du
-        // fournisseur. Le fournisseur n'est alors pas traite.
+        // Cas inverse : c'est `integrationID` qui pointe sur une integration
+        // enregistree, et l'identifiant du fournisseur qui n'est pas dans le
+        // registre. Le fournisseur n'est alors pas traite, ce qui prouve que le
+        // champ `integrationID` n'est jamais consulte. Donner la MEME chaine
+        // aux deux ne prouverait rien : la recherche porte sur l'id du
+        // fournisseur, elle aboutirait, et le test passerait a l'envers.
         let mut autre = llmgateway(&[]);
         autre.id = IdFournisseur::nouveau("mon-fournisseur");
-        autre.integration_id = Some(IdIntegration("mon-fournisseur".to_string()));
-        let integrations = registre_avec(&["mon-fournisseur"]);
+        autre.integration_id = Some(IdIntegration("llmgateway".to_string()));
+        let integrations = registre_avec(&["llmgateway"]);
         let mut catalogue = vec![autre];
 
         appliquer(&mut catalogue, &integrations);
-        assert!(catalogue[0].request.headers.is_empty());
+        assert!(
+            catalogue[0].request.headers.is_empty(),
+            "l id du fournisseur n'est pas enregistre : rien ne doit etre ecrit"
+        );
+        assert_eq!(
+            catalogue[0].integration_id.as_ref().map(|id| id.0.as_str()),
+            Some("llmgateway"),
+            "le champ integrationID ne doit pas etre modifie"
+        );
     }
 
     /// Seul `disabled: true` ecarte un fournisseur. `disabled: false` et

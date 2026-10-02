@@ -647,8 +647,13 @@ mod tests {
 
         let init = commandes.get(COMMANDE_INIT).expect("commande init absente");
         assert!(!init.template.contains(JETON_CHEMIN));
+        // Les deux CROCHETS GRAVES qui encadrent `${path}` dans `initialize.txt`
+        // font partie du texte, ils ne sont pas dans le jeton : le `.replace`
+        // ne touche qu'au jeton lui-meme. Le resultat est donc
+        // "exists at ``, improve", avec deux accents graves et la chaine vide
+        // entre eux, et non "exists at , improve".
         assert!(
-            init.template.contains("already exists at , improve it in place"),
+            init.template.contains("already exists at ``, improve it in place"),
             "le jeton disparait, la phrase reste : {}",
             init.template.lines().last().unwrap_or("")
         );
