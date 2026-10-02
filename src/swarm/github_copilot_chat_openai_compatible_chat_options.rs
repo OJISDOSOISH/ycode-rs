@@ -243,7 +243,17 @@ mod tests {
         assert_eq!(options.thinking_budget, Some(0.0));
 
         let relu = serde_json::to_value(&options).unwrap();
-        let attendu: Value = serde_json::from_str(source).unwrap();
+        // `thinking_budget` est un `f64` cote Rust, donc le litteral entier `0`
+        // de la source ressort en `0.0`. Or `serde_json::Value` distingue
+        // l entier du flottant : `N::PosInt` n est jamais egal a `N::Float`,
+        // meme pour zero. L attendu porte donc `0.0`. La valeur est la meme,
+        // et la cle n a pas disparu : seule son ecriture change de forme.
+        let attendu: Value = json!({
+            "user": "utilisateur-42",
+            "reasoningEffort": "medium",
+            "textVerbosity": "high",
+            "thinking_budget": 0.0
+        });
         assert_eq!(relu, attendu);
     }
 
@@ -278,9 +288,13 @@ mod tests {
 
         assert_eq!(options.thinking_budget, Some(0.0));
         assert_ne!(options.thinking_budget, None);
+        // Le champ est un `f64`, donc il sort en `0.0` et non en `0`. Ce qui
+        // compte ici n est pas la forme de l ecriture mais le fait que la cle
+        // existe et qu elle vaut zero : un portage par test de veracite
+        // l aurait supprimee, celle-ci la conserve.
         assert_eq!(
             serde_json::to_value(&options).unwrap()["thinking_budget"],
-            json!(0)
+            json!(0.0)
         );
     }
 

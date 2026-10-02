@@ -600,7 +600,22 @@ mod tests {
 
     #[test]
     fn les_feuilles_sont_les_services_que_personne_n_utilise() {
-        assert_eq!(leaves(), vec![ServiceId::LlmClient]);
+        // Une feuille est un service que PERSONNE ne met dans ses `deps`. Ni
+        // `FileSystem` ni `Path` n est declare comme dependance par qui que ce
+        // soit, donc ce sont des feuilles au meme titre que `LlmClient` : les
+        // trois n ont ni dependance ni dependant. Seuls `HttpClient` et
+        // `RequestExecutor` sont exclus, `RequestExecutor` declarant
+        // `HttpClient` et `LlmClient` declarant `RequestExecutor`.
+        assert_eq!(
+            leaves(),
+            vec![
+                ServiceId::FileSystem,
+                ServiceId::Path,
+                ServiceId::LlmClient
+            ]
+        );
+        assert!(!leaves().contains(&ServiceId::HttpClient));
+        assert!(!leaves().contains(&ServiceId::RequestExecutor));
     }
 
     #[test]
