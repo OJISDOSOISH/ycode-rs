@@ -144,3 +144,4 @@ pub mod database_migration_20260213144116_wakeful_the_professor;
 pub mod database_migration_20260225215848_workspace;
 pub mod database_migration_20260227213759_add_session_workspace_id;
 pub mod session_error;
+pub mod flag_flag;
