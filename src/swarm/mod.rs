@@ -42,6 +42,7 @@ pub mod database_path;
 pub mod database_schema_gen;
 pub mod database_schema_sql;
 pub mod database_sqlite;
+pub mod database_sqlite_bun;
 pub mod effect_app_node;
 pub mod effect_app_node_builder;
 pub mod effect_app_node_platform;
