@@ -139,3 +139,4 @@ pub mod provider_opencode;
 pub mod provider_sap_ai_core;
 pub mod provider_snowflake_cortex;
 pub mod database_migration_20260501142318_next_venus;
+pub mod database_migration_20260504145000_add_sync_owner;
