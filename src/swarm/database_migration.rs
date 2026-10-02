@@ -47,8 +47,6 @@
 //! migration` ``). Les deux branches sont portees : [`import_historique_nomme`]
 //! et [`trouver_migration_pour_prefixe`].
 
-use std::collections::BTreeSet;
-
 use serde::{Deserialize, Serialize};
 
 /// Nom de la table `session`, dont la presence signe une base existante.
@@ -126,11 +124,10 @@ pub fn sceau_journal(id_migration: &str, maintenant: i64) -> LigneJournal {
 /// C'est la boucle finale d'`applyOnly` : `if (completed.has(migration.id))
 /// continue`. L'ordre est celui de la liste d'entree, jamais celui du journal.
 pub fn migrations_en_attente<'a>(entree: &[&'a str], terminees: &[&str]) -> Vec<&'a str> {
-    let connues: BTreeSet<&&str> = terminees.iter().collect();
     entree
         .iter()
-        .filter(|id| !connues.contains(id))
         .copied()
+        .filter(|id| !terminees.contains(id))
         .collect()
 }
 
@@ -160,7 +157,7 @@ pub fn trouver_migration_pour_prefixe(prefixe: &str, ids_entree: &[&str]) -> Opt
     let debut = format!("{prefixe}_");
     ids_entree
         .iter()
-        .find(|id| id.starts_with(&debut))
+        .find(|id| id.starts_with(debut.as_str()))
         .map(|id| id.to_string())
 }
 
@@ -278,6 +275,6 @@ mod tests {
         assert_eq!(sceau.time_completed, 42);
         let json = serde_json::to_value(&sceau).unwrap();
         assert_eq!(json["id"], "20260127_x");
-        assert_eq!(json["time_completed"], 42);
+        assert_eq!(json["time_completed"], 42i64);
     }
 }
