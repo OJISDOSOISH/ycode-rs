@@ -1,4 +1,4 @@
-//! Portage de `packages/core/src/util/hash.ts`.
+﻿//! Portage de `packages/core/src/util/hash.ts`.
 //!
 //! La source expose un seul namespace `Hash`, avec exactement deux fonctions :
 //!
@@ -92,17 +92,6 @@ fn sha1_digest(entree: &[u8]) -> [u8; 20] {
         0xc3d2_e1f0,
     ];
     let mut w = [0u32; 80];
-    // Diagnostic : l IV TEL QUE LE BINAIRE LE VOIT, lu dans `h` et non
-    // reecrit ici. Reprintre la constante n aurait valeur de preuve que si elle
-    // venait de `h`.
-    #[cfg(test)]
-    let iv_vue = [h[0], h[1], h[2], h[3], h[4]];
-    // Les deux variables de diagnostic se declarent ICI, avant la boucle, et non
-    // dedans. Declarees dedans, elles sont hors de portee au eprintln qui suit la
-    // boucle : c est ce qui a casse la compilation deux fois de suite dans ce
-    // fichier, une fois pour a..e, puis une fois pour cette copie.
-    #[cfg(test)]
-    let mut derniers = (0u32, 0u32, 0u32, 0u32, 0u32);
 
     for bloc in donnees.chunks_exact(64) {
         lire_bloc(bloc, &mut w);
@@ -118,7 +107,13 @@ fn sha1_digest(entree: &[u8]) -> [u8; 20] {
             } else if i < 40 {
                 (b ^ c ^ d, 0x6ed9_eba1u32)
             } else if i < 60 {
-                ((b & c) | (b & d) | (c & d), 0x8f1b_bcdu32)
+                // Le dernier chiffre compte : les tours 40..59 du SHA-1 ont
+                // K = 0x8F1BBCDC, sur huit chiffres. Ecrit 0x8f1b_bcdu32, c
+                // est-a-dire sept, ca vaut 0x008F1BBCD et u32 accepte sept
+                // chiffres sans rien dire. Le condensat devient alors
+                // 3485e413... au lieu de da39a3ee..., sans que rien ne compile
+                // mal et sans qu'aucune assertion ne signale quoi que ce soit.
+                ((b & c) | (b & d) | (c & d), 0x8f1b_bcdcu32)
             } else {
                 (b ^ c ^ d, 0xca62_c1d6u32)
             };
@@ -136,13 +131,6 @@ fn sha1_digest(entree: &[u8]) -> [u8; 20] {
             a = temp;
         }
 
-        // Copie de diagnostic : A..E sont declares dans cette boucle, donc hors
-        // de portee apres. Ne change rien au calcul.
-        #[cfg(test)]
-        {
-            derniers = (a, b, c, d, e);
-        }
-
         h[0] = h[0].wrapping_add(a);
         h[1] = h[1].wrapping_add(b);
         h[2] = h[2].wrapping_add(c);
@@ -153,45 +141,6 @@ fn sha1_digest(entree: &[u8]) -> [u8; 20] {
     let mut sortie = [0u8; 20];
     for (i, mot) in h.iter().enumerate() {
         sortie[4 * i..4 * i + 4].copy_from_slice(&mot.to_be_bytes());
-    }
-    // TEMPORARY DIAGNOSTIC -- retirer avec le test homonyme.
-    //
-    // On imprime aussi l IV tel que le binaire le voit, et les cinq registres
-    // A..E du DERNIER bloc. Ils sont declares dans la boucle, donc hors de portee
-    // ici : `derniers` en garde une copie, ce qui ne change rien au calcul.
-    //
-    // Si l IV est celle du SHA-1 et que A..E valent 72f480ed 6e9d9f84 999ae2f1
-    // 852dc41a ec052519 -- les valeurs qu'une reference calcule sur CE
-    // remplissage -- alors h ne peut pas valoir autre chose que da39a3ee. S il
-    // vaut 3485e413 quand meme, le binaire n execute pas ce fichier, et c est le
-    // build qui est en cause, pas le portage.
-    #[cfg(test)]
-    if entree.is_empty() {
-        eprintln!(
-            "DIAG blocs={} w0={:08x} w1={:08x} w16={:08x} w79={:08x} \
-             IVvue={:08x}{:08x}{:08x}{:08x}{:08x} \
-             abcde={:08x}{:08x}{:08x}{:08x}{:08x} h={:08x}{:08x}{:08x}{:08x}{:08x}",
-            donnees.chunks_exact(64).count(),
-            w[0],
-            w[1],
-            w[16],
-            w[79],
-            iv_vue[0],
-            iv_vue[1],
-            iv_vue[2],
-            iv_vue[3],
-            iv_vue[4],
-            derniers.0,
-            derniers.1,
-            derniers.2,
-            derniers.3,
-            derniers.4,
-            h[0],
-            h[1],
-            h[2],
-            h[3],
-            h[4]
-        );
     }
     sortie
 }
@@ -279,97 +228,7 @@ fn sha256_digest(entree: &[u8]) -> [u8; 32] {
 
 #[cfg(test)]
 mod tests {
-    use super::{completer, fast, sha1_digest, sha256, vers_hex};
-
-    /// TEST DECISIF -- a supprimer apres identification.
-    ///
-    /// Le code de `sha1_digest` est, caractere par caractere, le SHA-1
-    /// canonique : le remplissage est exact, le calendrier de messages est
-    /// identique octet pour octet a une reference, et 262 144 variantes de la
-    /// fonction de tour, de l IV et des K ne reproduisent pas le condensat rendu.
-    ///
-    /// Reste une hypothese qui remet en cause l INSTRUMENT et non l objet : le
-    /// runner n executerait pas le fichier du depot. On la teste sans compiler
-    /// en local, en interrogeant deux implementations de reference de la MEME
-    /// machine, depuis l etape de test qui tourne deja.
-    ///
-    /// Les deux references doivent donner da39a3ee. Si elles la donnaient aussi, le
-    /// binaire n est pas en cause et le defaut est dans le code. Si elles ne la
-    /// donnent pas, la machine substitue, et tous les resultats du jour ont ete
-    /// mesures sur autre chose que le depot.
-    ///
-    /// PANIQUE volontairement : la CI n affiche la sortie que d un test en echec.
-    #[test]
-    fn le_runner_calcule_til_le_meme_sha1_que_node_et_python() {
-        fn condensat(programme: &str) -> String {
-            std::process::Command::new(programme)
-                .arg("-e")
-                .arg(
-                    "const c=require('crypto');console.log(c.createHash('sha1').update('').digest('hex'))",
-                )
-                .output()
-                .ok()
-                .and_then(|o| {
-                    if o.status.success() {
-                        Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or_else(|| "<indisponible>".to_string())
-        }
-
-        let node = condensat("node");
-        let python = std::process::Command::new("python")
-            .arg("-c")
-            .arg("import hashlib;print(hashlib.sha1(b'').hexdigest())")
-            .output()
-            .ok()
-            .and_then(|o| {
-                if o.status.success() {
-                    Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
-                } else {
-                    None
-                }
-            })
-            .unwrap_or_else(|| "<indisponible>".to_string());
-
-        panic!(
-            "node={} python={} NOTRE_CODE={} ATTENDU=da39a3ee5e6b4b0d3255bfef95601890afd80709",
-            node,
-            python,
-            fast("")
-        );
-    }
-
-    /// TEMPORARY DIAGNOSTIC -- a supprimer apres identification.
-    ///
-    /// Le code de `sha1_digest` est textuellement le SHA-1 canonique, et une
-    /// transliteration fidele donne le condensat correct. Le runner renvoie
-    /// pourtant 3485e413... pour l'entree vide. Ce test imprime donc l'etat
-    /// intermediaire pour voir OU les deux divergent. Il PANIQUE volontairement,
-    /// parce que la CI n'affiche la sortie que d'un test en echec.
-    #[test]
-    fn diagnostic_etat_intermediaire_du_sha1() {
-        let padded = completer(b"");
-        let padded_hex: String = padded
-            .iter()
-            .map(|b| format!("{:02x}", b))
-            .collect::<Vec<_>>()
-            .join("");
-        let digest = vers_hex(&sha1_digest(b""));
-        let reference = "da39a3ee5e6b4b0d3255bfef95601890afd80709";
-        panic!(
-            "longueur_remplie={} remplissage={} digest={} reference={} egal={}\nBLOCKS: {}",
-            padded.len(),
-            padded_hex,
-            digest,
-            reference,
-            digest == reference,
-            padded.chunks_exact(64).count(),
-        );
-    }
-
+    use super::{fast, sha256};
     // Message de 56 octets, choisi pour tomber juste avant une frontiere de
     // bloc et forcer le remplissage a repasser sur un second bloc.
     const MESSAGE_LONG: &str = "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq";

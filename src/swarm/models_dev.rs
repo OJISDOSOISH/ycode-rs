@@ -28,9 +28,11 @@
 //! du fichier est `tier_type` -> `"type"` dans le palier, herite de
 //! [`crate::core::model::CostTier`] (reutilise, jamais redeclare — meme
 //! regle que dans `plugin_variant.rs` : les types de contrat sont
-//! importes, pas copies). Un test verifie qu'un `cacheRead` camelCase est
-//! rejete a la lecture : si un jour l'API passait en camelCase, le port
-//! doit casser visiblement, pas silencieusement.
+//! importes, pas copies). Un test verifie qu'un `cacheRead` camelCase
+//! n'alimente pas `cache_read` : le TS ignore les cles en trop
+//! (`onExcessProperty: "ignore"`, comme dans `core/src/config.ts`), donc
+//! le champ reste absent et le `?? 0` de `cost` s'applique — le port ne
+//! pose pas `deny_unknown_fields`, qui romprait ce contrat.
 //!
 //! # Le piege `?` : verite, pas nullite
 //!
@@ -288,9 +290,19 @@ pub struct FournisseurModelsDev {
 
 /// Donnees completes de `models.dev` : la carte fournisseur-id ->
 /// fournisseur, en ordre d'insertion.
+///
+/// `data` est un `Record<string, Provider>` en TS, itere par
+/// `Object.values(...)` : la lecture part donc d'une **carte JSON**, pas
+/// d'un tableau. `#[serde(transparent)]` seul laisserait le `Vec`
+/// sous-jacent consommer la valeur (donc refuserait `{...}`) ;
+/// `deserialize_with` est donc pose sur le **champ** : sur un newtype,
+/// serde_derive ignore un `deserialize_with` de niveau conteneur, alors
+/// que `transparent` l'applique a son unique champ.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct DonneesModelsDev(pub Vec<(String, FournisseurModelsDev)>);
+pub struct DonneesModelsDev(
+    #[serde(deserialize_with = "carte_ordonnee")] pub Vec<(String, FournisseurModelsDev)>,
+);
 
 /// Variante optionnelle de [`carte_ordonnee`] pour un champ `Option`.
 fn carte_ordonnee_option<'de, D, T>(deserialiseur: D) -> Result<Option<Vec<(String, T)>>, D::Error>
@@ -367,7 +379,13 @@ pub fn publier(date: &str) -> f64 {
                     return 0.0;
                 }
                 let chiffres = &reste[debut..fin.min(debut + 3)];
-                millisecondes = format!("0.{chiffres}").parse::<f64>().unwrap_or(0.0);
+                // La fraction est lue en millisecondes, pas en secondes :
+                // `Date.parse("...T12:30:45.500Z")` vaut la seconde + 500 ms,
+                // et au-dela de la milliseconde la fraction est tronquee
+                // (comme V8). Entiers exacts, aucune derivee flottante.
+                let unite: i64 = chiffres.parse().unwrap_or(0);
+                let facteur = 10_i64.pow((3 - chiffres.len()) as u32);
+                millisecondes = (unite * facteur) as f64;
                 indice = fin;
             }
         }
@@ -796,8 +814,9 @@ mod tests {
     #[test]
     fn les_cles_du_contrat_sont_deja_en_snake_case() {
         // `api.json` est en snake_case : cache_read, cache_write, tool_call,
-        // release_date, context_over_200k. Le port lit ces cles et refuse
-        // les variantes camelCase : si l'API change de casse, ca casse ici.
+        // release_date, context_over_200k. Le port lit ces cles et n'invente
+        // pas les variantes camelCase : un `cacheRead` reste sans effet, donc
+        // le `cache_read` manque et le `?? 0` de `cost` s'applique.
         let cout: CoutModelsDev = serde_json::from_str(
             r#"{"input":3,"output":15,"cache_read":0.3,"cache_write":3.75}"#,
         )
@@ -805,9 +824,13 @@ mod tests {
         assert_eq!(cout.cache_read, Some(0.3));
         assert_eq!(cout.cache_write, Some(3.75));
 
-        let camel: Result<CoutModelsDev, _> =
-            serde_json::from_str(r#"{"input":3,"output":15,"cacheRead":0.3}"#);
-        assert!(camel.is_err(), "cacheRead camelCase doit etre refuse");
+        let camel: CoutModelsDev =
+            serde_json::from_str(r#"{"input":3,"output":15,"cacheRead":0.3}"#).unwrap();
+        assert_eq!(camel.input, Some(3.0));
+        assert_eq!(
+            camel.cache_read, None,
+            "cacheRead camelCase ne doit pas alimenter cache_read : la cle inconnue est ignoree comme en TS, donc `?? 0` s'applique"
+        );
     }
 
     #[test]
