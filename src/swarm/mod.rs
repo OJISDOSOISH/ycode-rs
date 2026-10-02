@@ -146,3 +146,4 @@ pub mod database_migration_20260428004200_add_session_path;
 pub mod config_attachments;
 pub mod session_error;
 pub mod flag_flag;
+pub mod database_path;
