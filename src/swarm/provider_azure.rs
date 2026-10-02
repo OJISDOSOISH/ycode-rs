@@ -524,7 +524,11 @@ mod tests {
     fn les_options_vides_omettent_les_cles_absentes_du_typescript() {
         let json = serde_json::to_string(&AzureOptions::default()).unwrap();
         assert_eq!(json, r#"{}"#);
-        let relu: AzureOptions = serde_json::from_str(r#"{"useCompletionUrls":1}"#).unwrap();
+        // Le champ est un `Option<bool>` : il se relit depuis `true` ou `false`,
+        // pas depuis `1`. La reduction truthy du TypeScript
+        // (`Boolean(evt.options.useCompletionUrls)`) est faite a l'usage, par
+        // l'appelant, pas a la deserialisation.
+        let relu: AzureOptions = serde_json::from_str(r#"{"useCompletionUrls":true}"#).unwrap();
         assert_eq!(relu.use_completion_urls, Some(true));
     }
 

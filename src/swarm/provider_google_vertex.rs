@@ -684,7 +684,11 @@ mod tests {
     fn les_noms_de_champs_serialises_sont_ceux_du_typescript() {
         let mut options = Options::new();
         options.insert(String::from("project"), Value::String(String::from("p")));
-        options.insert(String::from("location"), Value::String(String::from("global")));
+        // Region continentale `eu` : c'est la seule condition sous laquelle la
+        // source ajoute une `baseURL`
+        // (`(location === "eu" || location === "us") && project && !baseURL`).
+        // Avec `global`, aucune `baseURL` n'est produite.
+        options.insert(String::from("location"), Value::String(String::from("eu")));
         let mut evt = SdkEvent::new(model_de_test(), AI_SDK_PACKAGE_ANTHROPIC, options);
 
         let json = serde_json::to_value(&evt).unwrap();

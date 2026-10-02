@@ -704,6 +704,14 @@ mod tests {
         provider.integration_id = Some("int-anthropic".to_string());
         provider.disabled = Some(false);
 
+        // L'en-tete `anthropic-beta` n'est ecrit que par le callback de
+        // catalogue : sans passer par lui, `headers` ne contient que
+        // l'en-tete prealable du fournisseur de test.
+        let mut draft = CatalogProviderStore::new();
+        draft.push(provider);
+        catalog_transform(&mut draft);
+        let provider = draft.get("anthropic").unwrap().provider.clone();
+
         let json = serde_json::to_value(&provider).unwrap();
         let objet = json.as_object().unwrap();
 
@@ -722,17 +730,18 @@ mod tests {
         assert_eq!(api.get("type").and_then(Value::as_str), Some(API_TYPE_AISDK));
         assert_eq!(api.get("package").and_then(Value::as_str), Some(ANTHROPIC_SDK_PACKAGE));
 
-        // L'en-tete du plugin porte bien la cle avec son tiret, sous `headers`.
+        // L'en-tete du plugin porte bien la cle avec son tiret, sous `headers`,
+        // a cote de l'en-tete prealable qui survit.
         let headers = objet
             .get("request")
             .and_then(Value::as_object)
             .and_then(|request| request.get("headers"))
             .and_then(Value::as_object)
             .unwrap();
-        assert_eq!(headers.len(), 1);
+        assert_eq!(headers.len(), 2);
         assert_eq!(
             headers.get(ANTHROPIC_BETA_HEADER).and_then(Value::as_str),
-            Some("1")
+            Some(ANTHROPIC_BETA_VALUE)
         );
     }
 

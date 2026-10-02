@@ -250,10 +250,21 @@ mod tests {
     #[test]
     fn les_noms_de_champs_de_l_evenement_sont_exacts() {
         let json = serde_json::to_string(&evenement("@ai-sdk/mistral")).unwrap();
+        // `sdk` est `sdk?` en TypeScript et `Option<Value>` avec
+        // `skip_serializing_if` en Rust : la cle est absente tant qu'aucun SDK
+        // n'est construit. Les trois autres cles sortent dans l'ordre de la
+        // structure, `serde_json::to_string` n'etant pas concerne par
+        // `preserve_order` (qui ne joue que sur `Value`).
         assert_eq!(
             json,
-            r#"{"model":null,"package":"@ai-sdk/mistral","options":{"name":"mistral"},"sdk":null}"#
+            r#"{"model":null,"package":"@ai-sdk/mistral","options":{"name":"mistral"}}"#
         );
+
+        // Des qu'un SDK existe, la cle porte bien le nom `sdk`, verbatim.
+        let mut event = evenement("@ai-sdk/mistral");
+        on_sdk_event(&mut event, |_options: &Value| serde_json::json!("fabrique"));
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains(r#""sdk":"fabrique""#), "cle sdk absente : {json}");
     }
 
     #[test]
