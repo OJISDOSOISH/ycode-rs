@@ -653,7 +653,7 @@ mod tests {
         let event = evenement_language();
         assert_eq!(
             serde_json::to_string(&event).unwrap(),
-            r#"{"model":{"api":{"id":"gpt-4o"},"providerID":"sap-ai-core"}}}"#
+            r#"{"model":{"api":{"id":"gpt-4o"},"providerID":"sap-ai-core"}}"#
         );
     }
 }
