@@ -58,6 +58,7 @@ pub mod observability;
 pub mod observability_shared;
 pub mod permission_sql;
 pub mod plugin_command;
+pub mod plugin_agent;
 pub mod plugin_provider_llmgateway;
 pub mod plugin_skill;
 pub mod plugin_variant;
