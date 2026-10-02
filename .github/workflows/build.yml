@@ -62,10 +62,17 @@ jobs:
         run: |
           set -u
           echo "--- fichier source, blob du commit contre fichier sur disque ---"
+          # Les fins de ligne sont normalisees avant comparaison. Le blob Git
+          # contient LF, le fichier sur disque porte CRLF sur un runner Windows,
+          # donc les deuxempreintes SHA-256 different meme quand le contenu est
+          # identique. Sans cette normalisation la sonde signale DIVERGENT a tort,
+          # sort en erreur, et empeche toute compilation -- c est ce qui est
+          # arrive : le build etait bloque sur un faux positif.
+          norm() { tr -d '\r'; }
           for f in src/swarm/util_hash.rs src/core/fs_util.rs; do
             if git cat-file -e "HEAD:$f" 2>/dev/null; then
-              a=$(git show "HEAD:$f" | sha256sum | cut -d' ' -f1)
-              b=$(sha256sum "$f" | cut -d' ' -f1)
+              a=$(git show "HEAD:$f" | norm | sha256sum | cut -d' ' -f1)
+              b=$(norm < "$f" | sha256sum | cut -d' ' -f1)
               if [ "$a" = "$b" ]; then
                 echo "  $f  IDENTIQUE  $a"
               else
