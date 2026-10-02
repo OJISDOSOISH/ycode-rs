@@ -144,3 +144,4 @@ pub mod database_migration_20260611035744_credential;
 pub mod database_migration_20260611192811_lush_chimera;
 pub mod database_migration_20260612174303_project_dir_strategy;
 pub mod database_migration_gen;
+pub mod instruction_context;
