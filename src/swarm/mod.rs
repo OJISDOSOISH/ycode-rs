@@ -139,3 +139,4 @@ pub mod provider_opencode;
 pub mod provider_sap_ai_core;
 pub mod provider_snowflake_cortex;
 pub mod database_migration_20260410174513_workspace_name;
+pub mod database_migration_20260413175956_chief_energizer;
