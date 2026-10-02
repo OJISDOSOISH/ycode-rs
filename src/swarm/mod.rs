@@ -140,3 +140,4 @@ pub mod provider_sap_ai_core;
 pub mod provider_snowflake_cortex;
 pub mod database_migration_20260511173437_session_metadata;
 pub mod database_migration_20260601010001_normalize_storage_paths;
+pub mod database_migration_20260601202201_amazing_prowler;
