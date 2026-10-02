@@ -410,7 +410,7 @@ mod tests {
         // ternaire, alors que la famille `??` le conserve. Les trois
         // `PositiveInt` sont concernes exactement comme `auto_resize`.
         let zero = Some(0u64);
-        assert_eq!(zero.filter(|v| *v == 0), None);
+        assert_eq!(zero.filter(|v| *v != 0), None);
         assert_eq!(survit_si_null(zero), Some(0));
     }
 

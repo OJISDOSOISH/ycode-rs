@@ -339,12 +339,13 @@ mod tests {
         }
         for effet in ["allow", "deny"] {
             let json = format!(
-                "{{\"action\":\"provider.use\",\"effect\":\"{},\"resource\":\"*\"}}",
+                "{{\"action\":\"provider.use\",\"effect\":\"{}\",\"resource\":\"*\"}}",
                 effet
             );
+            let attendu = if effet == "allow" { Effect::Allow } else { Effect::Deny };
             assert_eq!(
                 serde_json::from_str::<Policy>(&json).unwrap().effect,
-                Effect::Allow,
+                attendu,
                 ""
             );
             // le second tour doit donner Deny : on verifie la chaine exacte
