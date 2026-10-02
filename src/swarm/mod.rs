@@ -38,6 +38,7 @@ pub mod cpk_metadata_extractor;
 pub mod credential_sql;
 pub mod database_database;
 pub mod database_migration;
+pub mod database_schema_sql;
 pub mod database_sqlite;
 pub mod effect_app_node;
 pub mod effect_app_node_builder;
