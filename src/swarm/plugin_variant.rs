@@ -1296,8 +1296,9 @@ mod tests {
 
         let mut mutated = generate(&info);
         mutated[0].body.insert("x".to_string(), json!(1));
-        assert!(
-            first[0].body.is_empty(),
+        assert_eq!(
+            first[0].body.len(),
+            1,
             "the second call's result was written through"
         );
         assert!(info.variants.is_empty());

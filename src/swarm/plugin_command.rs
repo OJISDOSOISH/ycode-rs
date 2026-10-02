@@ -648,7 +648,7 @@ mod tests {
         let init = commandes.get(COMMANDE_INIT).expect("commande init absente");
         assert!(!init.template.contains(JETON_CHEMIN));
         assert!(
-            init.template.contains("already exists at , improve it in place"),
+            init.template.contains("already exists at ``, improve it in place"),
             "le jeton disparait, la phrase reste : {}",
             init.template.lines().last().unwrap_or("")
         );

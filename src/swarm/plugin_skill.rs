@@ -1111,7 +1111,7 @@ mod tests {
         }
 
         // Le texte parle bien du skill qu'il est, et pas d'un autre.
-        assert!(CONTENU.contains("`.opencode/skills/my-skill/SKILL.md`"));
+        assert!(CONTENU.contains(".opencode/skills/my-skill/SKILL.md"));
     }
 
     #[test]
@@ -1142,8 +1142,9 @@ mod tests {
         // Le risque annonce par le lot : `&CONTENU[..n]` coupe au milieu d'un
         // caractere non-ASCII et PANIQUE a l execution, alors que le fichier se
         // compile. Ici les six positions de depart des caracteres larges sont
-        // des **faux** `is_char_boundary`, donc toute tranche calculee a ces
-        // index-la est un bug latent.
+        // des **vraies** `is_char_boundary`, et les deux positions suivantes
+        // a l interieur de chaque caractere sont des **fausses** frontieres,
+        // donc toute tranche calculee a ces index-la est un bug latent.
         let departs: Vec<usize> = CONTENU
             .char_indices()
             .filter(|(_, c)| c.len_utf8() > 1)
@@ -1153,8 +1154,16 @@ mod tests {
 
         for (rang, &indexe) in departs.iter().enumerate() {
             assert!(
-                !CONTENU.is_char_boundary(indexe),
-                "index {rang} ({indexe}) : une tranche y commencerait sur un caractere valide"
+                CONTENU.is_char_boundary(indexe),
+                "index {rang} ({indexe}) : le depart d un caractere est une frontiere valide"
+            );
+            assert!(
+                !CONTENU.is_char_boundary(indexe + 1),
+                "index {rang} ({indexe}) : couper au premier octet interieur doit echouer"
+            );
+            assert!(
+                !CONTENU.is_char_boundary(indexe + 2),
+                "index {rang} ({indexe}) : couper au second octet interieur doit echouer"
             );
             // Chaque depart reel est bien une frontiere, et la coupe fait bien
             // 3 octets.

@@ -530,7 +530,7 @@ mod tests {
         // Cas inverse : c'est `integrationID` qui est enregistre, pas l'id du
         // fournisseur. Le fournisseur n'est alors pas traite.
         let mut autre = llmgateway(&[]);
-        autre.id = IdFournisseur::nouveau("mon-fournisseur");
+        autre.id = IdFournisseur::nouveau("autre-fournisseur");
         autre.integration_id = Some(IdIntegration("mon-fournisseur".to_string()));
         let integrations = registre_avec(&["mon-fournisseur"]);
         let mut catalogue = vec![autre];
