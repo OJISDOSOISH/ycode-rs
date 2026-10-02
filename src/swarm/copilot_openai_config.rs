@@ -755,7 +755,9 @@ mod tests {
         )
         .unwrap();
         assert_eq!(parsed.provider, "");
-        assert!(!parsed.provider.is_empty(), "still a value, not an absence");
+        // The empty string is itself the value: presence is proven by the
+        // successful parse and by the key surviving on the wire below,
+        // not by a non-emptiness check ("" IS empty).
         let value = serde_json::to_value(parsed).unwrap();
         assert_eq!(value, json!({ "provider": "" }));
     }
@@ -764,12 +766,30 @@ mod tests {
     fn an_absent_prefix_list_and_an_empty_one_stay_distinct() {
         let absent: Option<Vec<String>> = None;
         let empty: Option<Vec<String>> = Some(Vec::new());
-        assert_ne!(
-            serde_json::to_value(&absent).unwrap(),
-            json!(null),
-            "None is skipped, it does not become a null on the wire"
-        );
+        // A bare `None` serialises to `null`; the skipping happens at the
+        // struct level through `skip_serializing_if`, not on a bare Option.
+        assert_eq!(serde_json::to_value(&absent).unwrap(), json!(null));
         assert_eq!(serde_json::to_value(&empty).unwrap(), json!([]));
+
+        // At the struct level the absent list is skipped while the empty
+        // list is kept, so the two states stay distinct on the wire.
+        let without = parse_open_ai_config(
+            &json!({ "provider": "copilot" }),
+            Box::new(sample_url),
+            Box::new(empty_headers),
+        )
+        .unwrap();
+        assert!(!serde_json::to_string(&without).unwrap().contains("fileIdPrefixes"));
+        let with_empty = parse_open_ai_config(
+            &json!({ "provider": "copilot", "fileIdPrefixes": [] }),
+            Box::new(sample_url),
+            Box::new(empty_headers),
+        )
+        .unwrap();
+        assert_eq!(with_empty.file_id_prefixes, Some(Vec::new()));
+        assert!(serde_json::to_string(&with_empty)
+            .unwrap()
+            .contains("\"fileIdPrefixes\":[]"));
 
         assert!(!is_file_id("file-abc", None::<&[String]>.as_deref()));
         assert!(!is_file_id("file-abc", empty.as_deref()));
@@ -805,13 +825,17 @@ mod tests {
         let data = "fichier-é-1";
         assert!(is_file_id(data, Some(&[String::from("fichier-é")])));
         assert!(is_file_id(data, Some(&[String::from("fichier")])));
-        assert!(!is_file_id(data, Some(&[String::from("fichie")])));
+        // "fichie" is the first six chars of "fichier", so it IS a prefix:
+        // startsWith is a pure prefix test with no word-boundary logic.
+        assert!(is_file_id(data, Some(&[String::from("fichie")])));
         assert!(!is_file_id(data, Some(&[String::from("fichier-é-2")])));
 
         let han = "\u{6587}\u{4ef6}-abc";
         assert!(is_file_id(han, Some(&[String::from("\u{6587}\u{4ef6}")])));
-        assert!(!is_file_id(han, Some(&[String::from("\u{6587}")])));
+        assert!(is_file_id(han, Some(&[String::from("\u{6587}")])));
 
+        // The single first char IS a prefix of the two-char identifier,
+        // so startsWith holds here as well.
         // The prefix is longer in bytes than the shorter candidate and is still
         // compared without a boundary check of our own.
         assert!(han.len() > han.chars().count());

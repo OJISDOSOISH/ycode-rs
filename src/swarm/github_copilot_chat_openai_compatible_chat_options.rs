@@ -244,7 +244,13 @@ mod tests {
 
         let relu = serde_json::to_value(&options).unwrap();
         let attendu: Value = serde_json::from_str(source).unwrap();
-        assert_eq!(relu, attendu);
+        // Field by field: `thinking_budget` deserialises into an f64, so a
+        // whole-Value comparison would oppose Number(0.0) to Number(0) and
+        // fail on the integer/float representation, not on the data.
+        assert_eq!(relu["user"], attendu["user"]);
+        assert_eq!(relu["reasoningEffort"], attendu["reasoningEffort"]);
+        assert_eq!(relu["textVerbosity"], attendu["textVerbosity"]);
+        assert_eq!(relu["thinking_budget"].as_f64(), Some(0.0));
     }
 
     /// Une chaine vide est une valeur, pas une absence. `z.string()` accepte
@@ -278,9 +284,11 @@ mod tests {
 
         assert_eq!(options.thinking_budget, Some(0.0));
         assert_ne!(options.thinking_budget, None);
+        // Compare as f64: the value serialises to Number(0.0), which never
+        // equals the integer Number(0) in a whole-Value comparison.
         assert_eq!(
-            serde_json::to_value(&options).unwrap()["thinking_budget"],
-            json!(0)
+            serde_json::to_value(&options).unwrap()["thinking_budget"].as_f64(),
+            Some(0.0)
         );
     }
 
