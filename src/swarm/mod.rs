@@ -144,3 +144,4 @@ pub mod database_migration_20260507164347_add_workspace_time;
 pub mod database_migration_20260510033149_session_usage;
 pub mod database_migration_20260511000411_data_migration_state;
 pub mod session_error;
+pub mod flag_flag;
