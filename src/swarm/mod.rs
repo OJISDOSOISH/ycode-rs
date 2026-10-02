@@ -138,4 +138,5 @@ pub mod provider_cloudflare_workers_ai;
 pub mod provider_opencode;
 pub mod provider_sap_ai_core;
 pub mod provider_snowflake_cortex;
+pub mod util_effect_flock;
 pub mod util_flock;
