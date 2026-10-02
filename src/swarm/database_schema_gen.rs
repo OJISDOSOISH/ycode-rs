@@ -313,7 +313,10 @@ pub fn nombre_index() -> usize {
 pub fn ddl_table(nom: &str) -> Option<&'static str> {
     TABLE_NAMES
         .iter()
-        .position(|table| *table == nom)
+        .position(|table| {
+            let table: &str = table;
+            table == nom
+        })
         .map(|position| TABLE_DDL[position])
 }
 
@@ -321,7 +324,10 @@ pub fn ddl_table(nom: &str) -> Option<&'static str> {
 pub fn ddl_index(nom: &str) -> Option<&'static str> {
     INDEX_NAMES
         .iter()
-        .position(|index| *index == nom)
+        .position(|index| {
+            let index: &str = index;
+            index == nom
+        })
         .map(|position| INDEX_DDL[position])
 }
 
@@ -353,7 +359,7 @@ mod tests {
         for (nom, ddl) in TABLE_NAMES.iter().zip(TABLE_DDL.iter()) {
             let attente = format!("CREATE TABLE `{nom}`");
             assert!(
-                ddl.contains(&attente),
+                ddl.contains(attente.as_str()),
                 "le DDL de {nom} doit commencer par {attente}"
             );
         }
