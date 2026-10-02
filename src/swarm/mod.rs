@@ -141,3 +141,4 @@ pub mod provider_snowflake_cortex;
 pub mod database_migration_20260501142318_next_venus;
 pub mod database_migration_20260504145000_add_sync_owner;
 pub mod database_migration_20260507164347_add_workspace_time;
+pub mod database_migration_20260510033149_session_usage;
