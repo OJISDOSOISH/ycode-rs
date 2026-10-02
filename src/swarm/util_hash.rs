@@ -118,7 +118,7 @@ fn sha1_digest(entree: &[u8]) -> [u8; 20] {
             } else if i < 40 {
                 (b ^ c ^ d, 0x6ed9_eba1u32)
             } else if i < 60 {
-                ((b & c) | (b & d) | (c & d), 0x8f1b_bcdu32)
+                ((b & c) | (b & d) | (c & d), 0x8f1b_bcdc)
             } else {
                 (b ^ c ^ d, 0xca62_c1d6u32)
             };
