@@ -144,5 +144,6 @@ pub mod github_copilot_responses_tool_code_interpreter;
 pub mod github_copilot_responses_tool_file_search;
 pub mod github_copilot_responses_tool_image_generation;
 pub mod github_copilot_responses_tool_local_shell;
+pub mod github_copilot_responses_tool_web_search;
 pub mod util_effect_flock;
 pub mod util_flock;
