@@ -143,3 +143,4 @@ pub mod database_migration_20260603040000_session_message_projection_order;
 pub mod database_migration_20260603141458_session_input_inbox;
 pub mod database_migration_20260603160727_jittery_ezekiel_stane;
 pub mod database_migration_20260604172448_event_sourced_session_input;
+pub mod database_path;
