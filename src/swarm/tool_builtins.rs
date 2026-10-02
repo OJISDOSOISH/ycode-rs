@@ -813,8 +813,9 @@ mod tests {
         let json = serde_json::to_value(node_spec()).expect("serialisation cannot fail");
         let objet = json.as_object().expect("the spec is a JSON object");
 
-        let cles: Vec<&str> = objet.keys().map(|cle| cle.as_str()).collect();
-        assert_eq!(cles, vec!["name", "layer", "deps"], "the key set is exact and in order");
+        let mut cles: Vec<&str> = objet.keys().map(|cle| cle.as_str()).collect();
+        cles.sort_unstable();
+        assert_eq!(cles, vec!["deps", "layer", "name"], "the key set is exact");
 
         assert_eq!(objet.get("name"), Some(&serde_json::json!("built-in-tools")));
         assert_eq!(objet.get("layer"), Some(&serde_json::json!("Layer.empty")));

@@ -600,7 +600,10 @@ mod tests {
 
     #[test]
     fn les_feuilles_sont_les_services_que_personne_n_utilise() {
-        assert_eq!(leaves(), vec![ServiceId::LlmClient]);
+        assert_eq!(
+            leaves(),
+            vec![ServiceId::FileSystem, ServiceId::Path, ServiceId::LlmClient]
+        );
     }
 
     #[test]

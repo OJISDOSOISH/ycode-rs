@@ -617,7 +617,11 @@ mod tests {
     #[test]
     fn une_carte_necessaire_et_absente_est_construite_et_ajoutee_en_dernier() {
         let appels = Cell::new(0usize);
-        let racine = AppNode::group(vec![noeud("A"), AppNode::group(vec![noeud("B")])]);
+        let racine = AppNode::group(vec![
+            noeud("A"),
+            AppNode::group(vec![noeud("B")]),
+            noeud(LOCATION_SERVICE_MAP_SERVICE_KEY),
+        ]);
         let remplacements = vec![Replacement::new(noeud("A"), noeud("A-bis"))];
 
         let plan = plan_de_test(&racine, &remplacements, &appels);
