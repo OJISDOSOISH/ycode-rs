@@ -108,8 +108,8 @@ mod tests {
     #[test]
     fn la_ligne_serialise_les_noms_de_colonnes_du_ddl() {
         let json = serde_json::to_value(Horodatages::new(42)).unwrap();
-        assert_eq!(json["time_created"], 42);
-        assert_eq!(json["time_updated"], 42);
+        assert_eq!(json["time_created"], 42i64);
+        assert_eq!(json["time_updated"], 42i64);
         assert_eq!(json.as_object().unwrap().len(), 2);
         assert!(json.get("timeCreated").is_none());
         assert!(json.get("timeUpdated").is_none());
