@@ -140,3 +140,4 @@ pub mod provider_sap_ai_core;
 pub mod provider_snowflake_cortex;
 pub mod database_migration_20260127222353_familiar_lady_ursula;
 pub mod database_migration_20260211171708_add_project_commands;
+pub mod database_migration_20260213144116_wakeful_the_professor;
