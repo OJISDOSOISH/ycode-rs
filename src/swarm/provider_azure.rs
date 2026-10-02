@@ -135,14 +135,48 @@ pub struct ProviderConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct AzureOptions {
     /// `options.resourceName`.
-    #[serde(rename = "resourceName", skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "resourceName", default, skip_serializing_if = "Option::is_none")]
     pub resource_name: Option<String>,
     /// `options.baseURL`.
-    #[serde(rename = "baseURL", skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "baseURL", default, skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
     /// `options.useCompletionUrls`, truthy TypeScript reduit a un booleen.
-    #[serde(rename = "useCompletionUrls", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "useCompletionUrls",
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_truthy_bool"
+    )]
     pub use_completion_urls: Option<bool>,
+}
+
+/// Deserialise `useCompletionUrls` selon `Boolean()` du TypeScript.
+///
+/// La source lit `Boolean(evt.options.useCompletionUrls)` : `1` vaut `true`,
+/// `0`, `""` et `false` valent `false`, les tableaux et objets valent `true`.
+/// `null` et l'absence valent `None`, comme une option non fournie.
+fn deserialize_optional_truthy_bool<'de, D>(deserializer: D) -> Result<Option<bool>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let valeur = Option::<Value>::deserialize(deserializer)?;
+    Ok(valeur.map(|v| match &v {
+        Value::Null => false,
+        Value::Bool(b) => *b,
+        Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                i != 0
+            } else if let Some(u) = n.as_u64() {
+                u != 0
+            } else if let Some(f) = n.as_f64() {
+                f != 0.0 && !f.is_nan()
+            } else {
+                true
+            }
+        }
+        Value::String(s) => !s.is_empty(),
+        Value::Array(_) | Value::Object(_) => true,
+    }))
 }
 
 /// Dit si un fournisseur du catalogue concerne le premier plugin.

@@ -454,17 +454,17 @@ impl BedrockSdkEvent {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct AwsEnv {
     /// `process.env.AWS_PROFILE`.
-    #[serde(rename = "profile")]
+    #[serde(rename = "profile", default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<String>,
     /// `process.env.AWS_REGION`.
-    #[serde(rename = "region")]
+    #[serde(rename = "region", default, skip_serializing_if = "Option::is_none")]
     pub region: Option<String>,
     /// `process.env.AWS_BEARER_TOKEN_BEDROCK`.
-    #[serde(rename = "bearerToken")]
+    #[serde(rename = "bearerToken", default, skip_serializing_if = "Option::is_none")]
     pub bearer_token: Option<String>,
     /// `Boolean(AWS_CONTAINER_CREDENTIALS_RELATIVE_URI ||
     /// AWS_CONTAINER_CREDENTIALS_FULL_URI)`.
-    #[serde(rename = "containerCredentials")]
+    #[serde(rename = "containerCredentials", default)]
     pub container_credentials: bool,
 }
 
@@ -568,7 +568,7 @@ impl BedrockPlugin {
     ///
     /// La liste est parcourue avant toute ecriture, comme en TS.
     pub fn transform(draft: &mut BedrockCatalogDraft) -> Vec<String> {
-        let touches: Vec<String> = draft
+        let candidats: Vec<String> = draft
             .list()
             .iter()
             .filter(|provider| {
@@ -577,7 +577,9 @@ impl BedrockPlugin {
             })
             .map(|provider| provider.id.clone())
             .collect();
-        for provider_id in &touches {
+        let mut touches = Vec::new();
+        for provider_id in &candidats {
+            let mut deplace = false;
             draft.update(provider_id, |provider| {
                 // Garde interne du `update` TS : l'api doit encore etre aisdk.
                 let BedrockApi::Aisdk { url, .. } = &mut provider.api else {
@@ -591,7 +593,11 @@ impl BedrockPlugin {
                 };
                 *url = Some(endpoint.to_string());
                 provider.request.body.remove(ENDPOINT_BODY_KEY);
+                deplace = true;
             });
+            if deplace {
+                touches.push(provider_id.clone());
+            }
         }
         touches
     }

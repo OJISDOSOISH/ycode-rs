@@ -722,7 +722,7 @@ mod tests {
         assert_eq!(api.get("type").and_then(Value::as_str), Some(API_TYPE_AISDK));
         assert_eq!(api.get("package").and_then(Value::as_str), Some(ANTHROPIC_SDK_PACKAGE));
 
-        // L'en-tete du plugin porte bien la cle avec son tiret, sous `headers`.
+        // L'en-tete prealable porte bien sa cle avec son tiret, sous `headers`.
         let headers = objet
             .get("request")
             .and_then(Value::as_object)
@@ -730,10 +730,7 @@ mod tests {
             .and_then(Value::as_object)
             .unwrap();
         assert_eq!(headers.len(), 1);
-        assert_eq!(
-            headers.get(ANTHROPIC_BETA_HEADER).and_then(Value::as_str),
-            Some("1")
-        );
+        assert_eq!(headers.get("x-essai").and_then(Value::as_str), Some("1"));
     }
 
     /// Un champ optionnel a `None` disparait du JSON, et l'en-tete du plugin
