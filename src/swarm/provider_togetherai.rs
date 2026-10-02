@@ -236,10 +236,7 @@ mod tests {
 
         /// Emet un evenement a tous les callbacks enregistres.
         fn emettre(&self, evt: &mut SdkEvent) {
-            // `pop` donne la valeur posee, sans avoir a cloner une boite de
-            // closure, ce qui serait impossible.
-            let crochet = self.crochets.lock().unwrap().pop();
-            if let Some(crochet) = crochet {
+            for crochet in self.crochets.lock().unwrap().iter() {
                 crochet(evt);
             }
         }

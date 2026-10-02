@@ -342,7 +342,7 @@ mod tests {
         assert!(reecrit_le_corps(&mut corps));
         assert_eq!(
             serde_json::to_string(&corps).unwrap(),
-            r#"{"model":"claude","messages":[],"max_completion_tokens":1024}"#
+            r#"{"max_completion_tokens":1024,"messages":[],"model":"claude"}"#
         );
     }
 

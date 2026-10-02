@@ -284,7 +284,12 @@ where
         env.service_key = cle;
     }
 
-    let chemin = resoudre_chemin_paquet(&event.package, installer(&event.package).as_deref())
+    let entree = if event.package.starts_with("file://") {
+        None
+    } else {
+        installer(&event.package)
+    };
+    let chemin = resoudre_chemin_paquet(&event.package, entree.as_deref())
         .ok_or_else(|| Erreur::PointEntreeManquant(event.package.clone()))?;
 
     // Une cle (resolue) impose les parametres d'environnement ; sinon `{}`.
@@ -642,13 +647,13 @@ mod tests {
         event.language = Some(serde_json::json!("langage"));
         assert_eq!(
             serde_json::to_string(&event).unwrap(),
-            r#"{"model":{"providerID":"sap-ai-core","api":{"id":"gpt-4o"}},"language":"langage"}"#
+            r#"{"model":{"api":{"id":"gpt-4o"},"providerID":"sap-ai-core"},"language":"langage"}"#
         );
         // Sans language : la cle est absente, comme un champ non pose en JS.
         let event = evenement_language();
         assert_eq!(
             serde_json::to_string(&event).unwrap(),
-            r#"{"model":{"providerID":"sap-ai-core","api":{"id":"gpt-4o"}}}"#
+            r#"{"model":{"api":{"id":"gpt-4o"},"providerID":"sap-ai-core"}}}"#
         );
     }
 }
