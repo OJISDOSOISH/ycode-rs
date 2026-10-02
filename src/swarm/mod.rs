@@ -139,3 +139,4 @@ pub mod provider_opencode;
 pub mod provider_sap_ai_core;
 pub mod provider_snowflake_cortex;
 pub mod database_migration_20260228203230_blue_harpoon;
+pub mod database_migration_20260303231226_add_workspace_fields;
