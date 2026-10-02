@@ -664,9 +664,9 @@ mod tests {
 
     #[test]
     fn le_decodeur_base64url_tolere_le_padding_et_rejette_le_standard() {
-        // 'e' = 30 -> 011100 ; 'A' = 0 -> 000000 ; 01110000 0000xxxx -> 112.
-        assert_eq!(decoder_base64url("eA==").unwrap(), vec![112u8]);
-        assert_eq!(decoder_base64url("eA").unwrap(), vec![112u8]);
+        // 'e' = 30 -> 011110 ; 'A' = 0 -> 000000 ; 01111000 -> 120.
+        assert_eq!(decoder_base64url("eA==").unwrap(), vec![120u8]);
+        assert_eq!(decoder_base64url("eA").unwrap(), vec![120u8]);
         assert!(decoder_base64url("e+/=").is_err()); // '+' et '/' hors alphabet
     }
 

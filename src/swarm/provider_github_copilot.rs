@@ -373,9 +373,12 @@ pub fn choix_langage(event: &LanguageHookEvent) -> LanguageChoice {
 /// rendu, comme le `return` precoce de la source. Sinon la decision est posee
 /// dans `evt.language` et rendue.
 ///
-/// `language_model` tient lieu de `evt.sdk.languageModel` : la fabrique
-/// recoit l'identifiant d'api et rend le modele de langage, exactement comme
-/// l'appel `evt.sdk.languageModel(evt.model.api.id)` de la source.
+/// `language_model` tient lieu du constructeur gagne (`languageModel`,
+/// `responses` ou `chat` selon `choix_langage`) : la fabrique recoit
+/// l'identifiant d'api et rend le modele de langage, comme l'appel
+/// `evt.sdk.*(evt.model.api.id)` de la source. Le `LanguageChoice` rendu
+/// dit quelle route a gagne ; sans lui l'appelant ne saurait pas laquelle
+/// des trois fonctions du SDK la fabrique remplace.
 pub fn on_language_event<F>(event: &mut LanguageHookEvent, language_model: F) -> Option<LanguageChoice>
 where
     F: FnOnce(&str) -> Value,
@@ -384,17 +387,8 @@ where
         return None;
     }
     let choix = choix_langage(event);
-    event.language = Some(match &choix {
-        LanguageChoice::LanguageModel => language_model(&event.model.api.id),
-        LanguageChoice::Responses => {
-            let _ = &event.sdk.responses;
-            Value::Null
-        }
-        LanguageChoice::Chat => {
-            let _ = &event.sdk.chat;
-            Value::Null
-        }
-    });
+    let modele = language_model(&event.model.api.id);
+    event.language = Some(modele);
     Some(choix)
 }
 

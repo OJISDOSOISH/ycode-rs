@@ -252,7 +252,7 @@ mod tests {
         let json = serde_json::to_string(&evenement("@ai-sdk/mistral")).unwrap();
         assert_eq!(
             json,
-            r#"{"model":null,"package":"@ai-sdk/mistral","options":{"name":"mistral"},"sdk":null}"#
+            r#"{"model":null,"package":"@ai-sdk/mistral","options":{"name":"mistral"}}"#
         );
     }
 
