@@ -37,6 +37,7 @@ pub mod core_workspace;
 pub mod cpk_metadata_extractor;
 pub mod credential_sql;
 pub mod database_database;
+pub mod database_migration;
 pub mod effect_app_node;
 pub mod effect_app_node_builder;
 pub mod effect_app_node_platform;
