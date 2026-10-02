@@ -894,9 +894,27 @@ pub fn encode_commands(commands: &ProjectCommands) -> Result<String, ColumnError
 /// Decode le texte JSON de la colonne `commands`.
 ///
 /// Un JSON qui n'est pas un objet `{ start?: string }` est refuse : c'est ce que
-/// ferait `JSON.parse` suivi de l'assertion de forme cote TypeScript.
+/// ferait `JSON.parse` suivi de l'assertion de forme cote TypeScript. Ni un
+/// tableau (`[]`, accepte par `serde_json` comme un struct vide par position),
+/// ni une chaine, ni un objet a cle inconnue ne passent.
 pub fn decode_commands(raw: &str) -> Result<ProjectCommands, ColumnError> {
-    serde_json::from_str(raw).map_err(|e| ColumnError::Json(e.to_string()))
+    let valeur: serde_json::Value =
+        serde_json::from_str(raw).map_err(|e| ColumnError::Json(e.to_string()))?;
+    let objet = match &valeur {
+        serde_json::Value::Object(m) => m,
+        _ => return Err(ColumnError::Json("commands doit etre un objet".to_string())),
+    };
+    for cle in objet.keys() {
+        if cle != "start" {
+            return Err(ColumnError::Json(format!("cle inconnue: {cle}")));
+        }
+    }
+    if let Some(v) = objet.get("start") {
+        if !(v.is_string() || v.is_null()) {
+            return Err(ColumnError::Json("start doit etre une chaine".to_string()));
+        }
+    }
+    serde_json::from_value(valeur).map_err(|e| ColumnError::Json(e.to_string()))
 }
 
 #[cfg(test)]
@@ -1277,8 +1295,10 @@ mod tests {
 
     #[test]
     fn un_chemi_unc_est_absolu_sur_windows_seulement() {
-        // `//` est traite comme absolu par `isWindowsStoragePath`, mais la
-        // branche n'est atteinte que sur win32.
+        // `//` est absolu des deux facons : par `isWindowsStoragePath` sur
+        // win32, et par `nodePath.posix.isAbsolute` partout (un chemin qui
+        // commence par `/` est absolu au sens posix, `//` compris). La source
+        // `database/path.ts` l accepte donc sur les deux plateformes.
         assert!(is_windows_storage_path("//serveur/partage"));
         assert!(is_windows_storage_path("C:/x"));
         assert!(is_windows_storage_path("z:/x"));
@@ -1286,7 +1306,7 @@ mod tests {
         assert!(!is_windows_storage_path("/x"));
         assert!(!is_windows_storage_path("1:/x"), "le lecteur doit etre une lettre");
         assert!(absolute("//serveur/partage", StoragePlatform::Windows).is_ok());
-        assert!(absolute("//serveur/partage", StoragePlatform::Unix).is_err());
+        assert!(absolute("//serveur/partage", StoragePlatform::Unix).is_ok());
     }
 
     #[test]
@@ -1310,7 +1330,16 @@ mod tests {
         p.set_worktree("C:\\srv\\depot", StoragePlatform::Windows).unwrap();
         assert_eq!(p.worktree, "C:/srv/depot");
         assert_eq!(p.read_worktree(StoragePlatform::Windows).unwrap(), "C:\\srv\\depot");
-        assert_eq!(p.read_worktree(StoragePlatform::Unix).unwrap(), "C:/srv/depot");
+        // Sur Unix, un chemin Windows n est pas absolu au sens posix et la
+        // branche win32 de `absolute` n est pas atteinte : la relecture echoue,
+        // comme le ferait `fromDriver` de `database/path.ts` avec
+        // `process.platform != "win32"`.
+        assert!(p.read_worktree(StoragePlatform::Unix).is_err());
+        // Un chemin posix se relit sur les deux plateformes, car
+        // `isWindowsStoragePath` le rejette et le posix reste tel quel.
+        p.set_worktree("/srv/depot", StoragePlatform::Unix).unwrap();
+        assert_eq!(p.read_worktree(StoragePlatform::Unix).unwrap(), "/srv/depot");
+        assert_eq!(p.read_worktree(StoragePlatform::Windows).unwrap(), "/srv/depot");
     }
 
     #[test]

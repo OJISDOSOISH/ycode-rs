@@ -847,7 +847,10 @@ mod tests {
     fn an_extra_json_of_any_shape_is_accepted() {
         // La colonne est en `mode: "json"` mais **sans** `$type`, et le contrat
         // de l'application est `Schema.Unknown`. Un `struct` ici inventerait une
-        // contrainte que ni le DDL ni l'ORM ne portent.
+        // contrainte que ni le DDL ni l'ORM ne portent. La comparaison porte sur
+        // la valeur, pas sur la chaine : `serde_json` sans `preserve_order`
+        // trie les cles d objet (BTreeMap), la ou `JSON.stringify` garde
+        // l ordre d insertion. `{"url":..,"port":..}` revient donc trie.
         for brut in [
             r#"{"url":"https://exemple","port":8080}"#,
             r#"["a","b"]"#,
@@ -856,7 +859,10 @@ mod tests {
             "true",
         ] {
             let relu = decode_extra(brut).unwrap_or_else(|e| panic!("{brut} aurait du etre accepte : {e}"));
-            assert_eq!(encode_extra(&relu).unwrap(), brut, "l aller-retour doit etre stable");
+            let reencode = encode_extra(&relu).unwrap();
+            let valeur_origine: serde_json::Value = serde_json::from_str(brut).unwrap();
+            let valeur_reencodee: serde_json::Value = serde_json::from_str(&reencode).unwrap();
+            assert_eq!(valeur_reencodee, valeur_origine, "l aller-retour doit preserver la valeur");
         }
     }
 

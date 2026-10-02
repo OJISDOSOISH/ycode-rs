@@ -304,19 +304,20 @@ pub const CONTROL_ACCOUNT_PRIMARY_KEY: [&str; 2] = ["email", "url"];
 /// colonne est deja porte par `src/swarm/event_sql.rs`, et le dupliquer ici
 /// ferait diverger deux descriptions du meme modele.
 ///
-/// La reponse est `!not_null_declare || est_primaire` :
+/// La reponse est `!not_null_declare` :
 ///
-/// - la source ecrit `notNull()` : `NULL` est refuse ;
-/// - la source n'ecrit rien : `NULL` est admis ;
-/// - la colonne porte la cle primaire : `NULL` est admis **malgre tout**, car le
-///   DDL produit par Drizzle n'y met pas de `NOT NULL` et que SQLite, dans une
-///   table a `rowid`, ne traite pas `PRIMARY KEY` comme `NOT NULL`.
+/// - la source ecrit `notNull()` : `NULL` est refuse, meme quand la colonne
+///   fait partie d une cle primaire composite (cas de `control_account.email`
+///   et `url`, declares `NOT NULL` et en cle) ;
+/// - la source n ecrit rien : `NULL` est admis, que la colonne soit en cle
+///   primaire (`account.id`, `TEXT PRIMARY KEY` sans `NOT NULL`, que SQLite
+///   accepte a `NULL` dans une table a `rowid`) ou non (`token_expiry`).
 ///
-/// Le troisieme cas est le raison d'etre de cette fonction. C'est lui qui
+/// Le second cas est le raison d etre de cette fonction. C est lui qui
 /// explique que `account.id` soit un `Option<String>` alors que la colonne est
 /// une cle primaire.
-pub fn admet_null_sans_pragma(not_null_declare: bool, est_primaire: bool) -> bool {
-    !not_null_declare || est_primaire
+pub fn admet_null_sans_pragma(not_null_declare: bool, _est_primaire: bool) -> bool {
+    !not_null_declare
 }
 
 // ---------------------------------------------------------------------------
@@ -514,19 +515,24 @@ pub enum Expiration {
 /// C'est la violation de la cle primaire de `account`, vue sur les donnees - et
 /// c'est aussi la fonction qui rend visible le piege du fichier.
 ///
-/// Le detail qui compte est le retour `Some(None)` : **deux lignes sans
-/// identifiant ne sont pas un doublon**. La cle primaire de `account` est
-/// `id text PRIMARY KEY` sans `NOT NULL`, SQLite y accepte `NULL`, et le moteur
-/// ne considere pas deux `NULL` comme egaux pour une contrainte d'unicite. La
-/// cle primaire n'y garantit donc strictement rien.
+/// Le detail qui compte est que deux lignes sans identifiant ne sont **pas** un
+/// doublon : la cle primaire de `account` est `id text PRIMARY KEY` sans
+/// `NOT NULL`, SQLite y accepte `NULL`, et le moteur ne considere pas deux
+/// `NULL` comme egaux pour une contrainte d unicite. La fonction saute donc
+/// les `None` et ne rend que `Some(Some(id))` ou `None`. La cle primaire n y
+/// garantit donc strictement rien.
 ///
 /// "Premiere" signifie premiere dans l'ordre de la tranche, ce qui rend le
 /// resultat stable et dependant uniquement de l'ordre de lecture.
 pub fn first_duplicate_by_id(rows: &[AccountRow]) -> Option<Option<String>> {
-    let mut vues: BTreeSet<&Option<String>> = BTreeSet::new();
+    let mut vues: BTreeSet<&String> = BTreeSet::new();
     for row in rows {
-        if !vues.insert(&row.id) {
-            return Some(row.id.clone());
+        let id = match &row.id {
+            None => continue,
+            Some(valeur) => valeur,
+        };
+        if !vues.insert(id) {
+            return Some(Some(id.clone()));
         }
     }
     None
@@ -945,7 +951,7 @@ mod tests {
         // Le tableau complet des quatre cas. C'est la table de verite du
         // modele, et elle tient en quatre lignes.
         //               notNull ecrit | cle primaire | NULL admis ?
-        assert!(admet_null_sans_pragma(true, false), "notNull ecrit refuse NULL");
+        assert!(!admet_null_sans_pragma(true, false), "notNull ecrit refuse NULL");
         assert!(!admet_null_sans_pragma(true, true), "NOT NULL l emporte sur PRIMARY KEY");
         assert!(admet_null_sans_pragma(false, false), "rien n est ecrit, rien n interdit");
         assert!(admet_null_sans_pragma(false, true), "PRIMARY KEY n emporte PAS NOT NULL");
@@ -971,10 +977,13 @@ mod tests {
 
     #[test]
     fn les_listes_de_drapaux_ne_nominent_que_des_colonnes_reelles_et_jamais_les_deux() {
-        // Une colonne ne peut pas porter les deux drapeaux dans le DDL de ces
-        // trois tables : `notNull` ecrit disparait quand `primaryKey` est pose.
-        // Ce test echoue si quelqu'un ajoute une colonne aux deux listes, ou un
-        // nom de colonne qui n existe pas.
+        // Chaque liste ne nomme que des colonnes reelles. La disjonction
+        // notNull / primaryKey ne vaut que pour les drapeaux poses colonne par
+        // colonne (`account.id` est primaryKey sans notNull) : `control_account`
+        // porte sa cle en contrainte de table sur deux colonnes `NOT NULL`
+        // (`email`, `url`), donc le recouvrement y est attendu, comme le DDL
+        // `text NOT NULL` + `PRIMARY KEY(email, url)` l impose.
+        // Ce test echoue si quelqu'un ajoute un nom de colonne qui n existe pas.
         for (colonnes, not_null, primaires) in [
             (
                 ACCOUNT_COLUMNS.as_slice(),
@@ -994,12 +1003,19 @@ mod tests {
         ] {
             for nom in not_null {
                 assert!(colonnes.contains(nom), "{nom} doit etre une colonne de la table");
-                assert!(!primaires.contains(nom), "{nom} ne peut pas porter les deux drapeaux");
             }
             for nom in primaires {
                 assert!(colonnes.contains(nom), "{nom} doit etre une colonne de la table");
             }
         }
+        // Disjonction des drapeaux de colonne : `account.id` et
+        // `account_state.id` portent primaryKey sans notNull ecrit.
+        assert!(!ACCOUNT_NOT_NULL_DECLARES.contains(&"id"));
+        assert!(!ACCOUNT_STATE_NOT_NULL_DECLARES.contains(&"id"));
+        // Recouvrement attendu de la cle composite : les deux colonnes de la
+        // contrainte sont bien declarees NOT NULL dans la source.
+        assert!(CONTROL_ACCOUNT_NOT_NULL_DECLARES.contains(&"email"));
+        assert!(CONTROL_ACCOUNT_NOT_NULL_DECLARES.contains(&"url"));
     }
 
     // -- formes de ligne et noms de colonnes --------------------------------
