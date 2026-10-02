@@ -131,7 +131,7 @@ where
 /// deux champs de cache sont optionnels dans le type TS (le `?? 0` de
 /// `cost` le prouve), donc des `Option` ici.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct CoutModelsDev {
     pub input: Option<f64>,
     pub output: Option<f64>,
@@ -288,9 +288,25 @@ pub struct FournisseurModelsDev {
 
 /// Donnees completes de `models.dev` : la carte fournisseur-id ->
 /// fournisseur, en ordre d'insertion.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-#[serde(transparent)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct DonneesModelsDev(pub Vec<(String, FournisseurModelsDev)>);
+
+impl Serialize for DonneesModelsDev {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(self.0.len()))?;
+        for (cle, fournisseur) in &self.0 {
+            map.serialize_entry(cle, fournisseur)?;
+        }
+        map.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for DonneesModelsDev {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        carte_ordonnee(deserializer).map(DonneesModelsDev)
+    }
+}
 
 /// Variante optionnelle de [`carte_ordonnee`] pour un champ `Option`.
 fn carte_ordonnee_option<'de, D, T>(deserialiseur: D) -> Result<Option<Vec<(String, T)>>, D::Error>
@@ -367,7 +383,11 @@ pub fn publier(date: &str) -> f64 {
                     return 0.0;
                 }
                 let chiffres = &reste[debut..fin.min(debut + 3)];
-                millisecondes = format!("0.{chiffres}").parse::<f64>().unwrap_or(0.0);
+                // Fraction de seconde en millisecondes : "0.500" -> 500 ms.
+                millisecondes = format!("0.{chiffres}")
+                    .parse::<f64>()
+                    .unwrap_or(0.0)
+                    * 1_000.0;
                 indice = fin;
             }
         }
