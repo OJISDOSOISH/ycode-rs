@@ -826,7 +826,14 @@ mod tests {
 
         let han = "\u{6587}\u{4ef6}-abc";
         assert!(is_file_id(han, Some(&[String::from("\u{6587}\u{4ef6}")])));
-        assert!(!is_file_id(han, Some(&[String::from("\u{6587}")])));
+        // "文" est un prefixe LEGITIME de "文件-abc" : il tombe sur une
+        // frontiere de caractere, donc `data.startsWith("文")` est vrai et la
+        // source repond vrai. Le prefixe qui couperait 文 au milieu de ses trois
+        // octets n'est pas spellable dans une `String` Rust : les seuls cas
+        // negatifs spellables sont des prefixes qui different.
+        assert!(is_file_id(han, Some(&[String::from("\u{6587}")])));
+        assert!(!is_file_id(han, Some(&[String::from("\u{4ef6}")]))); // "件" n'est pas en tete
+        assert!(!is_file_id(han, Some(&[String::from("\u{6587}\u{6587}")]))); // ni "文文"
 
         // The prefix is longer in bytes than the shorter candidate and is still
         // compared without a boundary check of our own.

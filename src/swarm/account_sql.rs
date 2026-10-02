@@ -92,12 +92,17 @@
 //!
 //! La source ecrit `id: text().$type<AccountV2.ID>().primaryKey()`, **sans**
 //! `.notNull()`. Le DDL produit dit `id text PRIMARY KEY`, sans `NOT NULL`, et
-//! l'instantane de `drizzle-kit` enregistre `"notNull": false`. Ce qui est
-//! notable, c'est que `id: text().notNull().primaryKey()` produirait le meme
-//! DDL et le meme instantane : sur cette colonne, `notNull` est ecrit et perd.
-//! SQLite ne le rattrape pas - une `TEXT PRIMARY KEY` d'une table a `rowid`
-//! **accepte `NULL`**, et deux lignes nulles n'entrent donc pas en collision
-//! sur la cle primaire.
+//! l'instantane de `drizzle-kit` enregistre `"notNull": false`. Ce qui compte
+//! est que `primaryKey()` n'ecrit **pas** `NOT NULL` dans le DDL : une
+//! `TEXT PRIMARY KEY` d'une table a `rowid` **accepte `NULL`**, et
+//! deux lignes nulles n'entrent donc pas en collision sur la cle primaire.
+//!
+//! Le symetrique est faux, et la meme source le prouve : `control_account`
+//! ecrit `email` en `.notNull()` *et* dans la cle primaire composee, et le DDL
+//! genere produit `` `email` text NOT NULL `` puis
+//! `CONSTRAINT control_account_pk PRIMARY KEY(`email`, `url`)`. `notNull()`
+//! n'est donc jamais ecrase par `primaryKey` : c'est la seule des deux
+//! contraintes qui interdit `NULL`.
 //!
 //! C'est pourquoi [`AccountRow::id`] est un `Option<String>` et non un
 //! `String`, et pourquoi [`first_duplicate_by_id`] existe : sans elle, on
@@ -304,19 +309,27 @@ pub const CONTROL_ACCOUNT_PRIMARY_KEY: [&str; 2] = ["email", "url"];
 /// colonne est deja porte par `src/swarm/event_sql.rs`, et le dupliquer ici
 /// ferait diverger deux descriptions du meme modele.
 ///
-/// La reponse est `!not_null_declare || est_primaire` :
+/// La reponse est `!not_null_declare`, et rien d'autre :
 ///
-/// - la source ecrit `notNull()` : `NULL` est refuse ;
-/// - la source n'ecrit rien : `NULL` est admis ;
-/// - la colonne porte la cle primaire : `NULL` est admis **malgre tout**, car le
-///   DDL produit par Drizzle n'y met pas de `NOT NULL` et que SQLite, dans une
-///   table a `rowid`, ne traite pas `PRIMARY KEY` comme `NOT NULL`.
+/// - la source ecrit `notNull()` : le DDL porte `NOT NULL`, donc `NULL` est
+///   refuse, cle primaire ou pas ;
+/// - la source n'ecrit rien : `NULL` est admis, cle primaire ou pas.
 ///
-/// Le troisieme cas est le raison d'etre de cette fonction. C'est lui qui
+/// `PRIMARY KEY` n'ajoute jamais de `NOT NULL` a la colonne : le DDL produit
+/// par Drizzle n'ecrit que la contrainte de cle, et SQLite, dans une table a
+/// `rowid`, ne traite pas `PRIMARY KEY` comme `NOT NULL`. C'est ce qui
 /// explique que `account.id` soit un `Option<String>` alors que la colonne est
 /// une cle primaire.
-pub fn admet_null_sans_pragma(not_null_declare: bool, est_primaire: bool) -> bool {
-    !not_null_declare || est_primaire
+///
+/// Le second drapeau ne change donc jamais la reponse, et il est garde quand
+/// meme : il porte le recouvrement, que le test suivant met en evidence.
+/// `control_account.email` et `control_account.url` sont les deux seules
+/// colonnes du fichier qui portent les deux drapeaux a la fois, et le DDL
+/// genere tranche : `` `email` text NOT NULL `` puis
+/// `CONSTRAINT control_account_pk PRIMARY KEY(`email`, `url`)`. Le `NOT NULL`
+/// explicite l'emporte, `NULL` y est refuse.
+pub fn admet_null_sans_pragma(not_null_declare: bool, _est_primaire: bool) -> bool {
+    !not_null_declare
 }
 
 // ---------------------------------------------------------------------------
@@ -956,9 +969,13 @@ mod tests {
         //
         //               notNull ecrit | cle primaire | NULL admis ?
         //                       oui      |      non     |     non
-        //                       oui      |      oui     |     oui
+        //                       oui      |      oui     |     non
         //                       non      |      non     |     oui
         //                       non      |      oui     |     oui
+        //
+        // La deuxieme ligne est `control_account.email` : `notNull()` ecrit ET
+        // colonne de la cle primaire composee. Le DDL genere porte les deux,
+        // et le `NOT NULL` explicite l'emporte.
         assert!(!admet_null_sans_pragma(true, false), "notNull ecrit refuse NULL");
         assert!(!admet_null_sans_pragma(true, true), "NOT NULL l emporte sur PRIMARY KEY");
         assert!(admet_null_sans_pragma(false, false), "rien n est ecrit, rien n interdit");

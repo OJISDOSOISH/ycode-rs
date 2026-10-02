@@ -893,8 +893,12 @@ pub fn encode_commands(commands: &ProjectCommands) -> Result<String, ColumnError
 
 /// Decode le texte JSON de la colonne `commands`.
 ///
-/// Un JSON qui n'est pas un objet `{ start?: string }` est refuse : c'est ce que
-/// ferait `JSON.parse` suivi de l'assertion de forme cote TypeScript.
+/// Est refuse ce qui n'est pas le document `{ start?: string }` : du texte qui
+/// n'est pas du JSON, un JSON qui n'est pas un objet, et un `start` qui n'est
+/// pas une chaine. Un JSON valide qui n'a simplement pas de `start` - `{}`,
+/// `[]`, `{ "demarrage": "x" }` - est en revanche un succes qui rend
+/// `ProjectCommands::default()`, exactement comme le ferait en JavaScript un
+/// acces a `.start` qui vaut `undefined`.
 pub fn decode_commands(raw: &str) -> Result<ProjectCommands, ColumnError> {
     serde_json::from_str(raw).map_err(|e| ColumnError::Json(e.to_string()))
 }
@@ -1457,21 +1461,27 @@ mod tests {
         assert_eq!(decode_commands(p.commands.as_deref().unwrap()).unwrap().start.as_deref(), Some("pnpm dev"));
     }
 
-#[test]
+    #[test]
     fn des_commandes_mal_formees_sont_refusees() {
         // Ce qui est refuse est ce que le codec refuse devant un
-        // `{ start?: string }` : un JSON qui n'est pas un objet, et un `start`
-        // qui n'est pas une chaine. Le `$type<{ start?: string }>()` de la
-        // source n'y change rien : c'est un typage statique, efface a la
-        // compilation, et `mode: "json"` n'y applique que `JSON.parse`.
-        for invalide in [r#"[]"#, r#""x""#, r#"{"start":1}"#, "nope"] {
+        // `{ start?: string }` : un `start` qui n'est pas une chaine, et un
+        // texte qui n'est pas du JSON. Le `$type<{ start?: string }>()` de la
+        // source est un typage statique, efface a la compilation, et
+        // `mode: "json"` n'y applique que `JSON.parse`.
+        for invalide in [r#""x""#, r#"{"start":1}"#, "nope"] {
             assert!(
                 matches!(decode_commands(invalide), Err(ColumnError::Json(_))),
                 "{invalide} ne devrait pas se decoder"
             );
         }
-        // En revanche une cle etrangere a `start` n'est pas un refus : c'est
-        // une absence de `start`. Le codec ignore le champ inconnu, et rend
+        // `[]` n'est PAS un refus, et le test le disait faux. C'est du JSON
+        // valide : `JSON.parse("[]")` reussit, `[].start` vaut `undefined` en
+        // JavaScript, et le derive `serde` remplit le champ `default` depuis
+        // une sequence vide. Les deux chemins aboutissent a
+        // `ProjectCommands::default()`.
+        assert_eq!(decode_commands(r#"[]"#).unwrap(), ProjectCommands::default());
+        // Une cle etrangere a `start` n'est pas un refus non plus : c'est une
+        // absence de `start`. Le codec ignore le champ inconnu, et rend
         // exactement ce que rendrait en JavaScript un acces a `.start` sur
         // `{ demarrage: "x" }`, c'est-a-dire `undefined`.
         assert_eq!(
