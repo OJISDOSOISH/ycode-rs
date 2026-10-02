@@ -12,7 +12,7 @@ name: build
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'lane/**']
   pull_request:
   workflow_dispatch:
 
