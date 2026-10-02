@@ -1275,18 +1275,29 @@ mod tests {
         );
     }
 
-    #[test]
-    fn un_chemi_unc_est_absolu_sur_windows_seulement() {
-        // `//` est traite comme absolu par `isWindowsStoragePath`, mais la
-        // branche n'est atteinte que sur win32.
+#[test]
+    fn un_chemin_unc_est_absolu_sur_windows_seulement() {
+        // `//` est traite comme absolu par `isWindowsStoragePath`, mais ce n'est
+        // pas la seule porte : `path.posix.isAbsolute` accepte **tout** ce qui
+        // commence par `/`, y compris `//`. La branche `isWindowsStoragePath`
+        // est la seule qui soit reservee a win32, et elle n'apporte rien ici.
+        // Le chemin UNC est donc absolu sur les deux plateformes, et `absolute`
+        // le rend intact dans les deux cas, slashs initiaux compris.
         assert!(is_windows_storage_path("//serveur/partage"));
         assert!(is_windows_storage_path("C:/x"));
         assert!(is_windows_storage_path("z:/x"));
         assert!(!is_windows_storage_path("C:\\x"), "la forme windows ne l est pas");
         assert!(!is_windows_storage_path("/x"));
         assert!(!is_windows_storage_path("1:/x"), "le lecteur doit etre une lettre");
-        assert!(absolute("//serveur/partage", StoragePlatform::Windows).is_ok());
-        assert!(absolute("//serveur/partage", StoragePlatform::Unix).is_err());
+        assert_eq!(
+            absolute("//serveur/partage", StoragePlatform::Windows),
+            Ok("//serveur/partage".to_string())
+        );
+        assert_eq!(
+            absolute("//serveur/partage", StoragePlatform::Unix),
+            Ok("//serveur/partage".to_string()),
+            "sur Unix, un chemin qui commence par / est deja absolu"
+        );
     }
 
     #[test]
@@ -1310,7 +1321,15 @@ mod tests {
         p.set_worktree("C:\\srv\\depot", StoragePlatform::Windows).unwrap();
         assert_eq!(p.worktree, "C:/srv/depot");
         assert_eq!(p.read_worktree(StoragePlatform::Windows).unwrap(), "C:\\srv\\depot");
-        assert_eq!(p.read_worktree(StoragePlatform::Unix).unwrap(), "C:/srv/depot");
+        // Forme ecrite et forme lue divergent, et c'est porte de consequence :
+        // ce que la plateforme windows a ecrit porte un lecteur `C:`, que
+        // `path.posix.isAbsolute` refuse. Relaire cette ligne sur un autre
+        // systeme leve donc, comme le ferait `fromDriver` en JavaScript, qui
+        // appelle `absolute` avant `toPlatform`.
+        assert_eq!(
+            p.read_worktree(StoragePlatform::Unix),
+            Err(ColumnError::Path(PathError::NotAbsolute("C:/srv/depot".to_string())))
+        );
     }
 
     #[test]
@@ -1438,17 +1457,27 @@ mod tests {
         assert_eq!(decode_commands(p.commands.as_deref().unwrap()).unwrap().start.as_deref(), Some("pnpm dev"));
     }
 
-    #[test]
+#[test]
     fn des_commandes_mal_formees_sont_refusees() {
-        // Ici le `$type<{ start?: string }>()` est porteur, parce que la
-        // colonne est en `mode: "json"` : l ORM y applique `JSON.parse`, et le
-        // type est donc reellement verifie.
-        for invalide in [r#"[]"#, r#""x""#, r#"{"start":1}"#, r#"{"demarrage":"x"}"#, "nope"] {
+        // Ce qui est refuse est ce que le codec refuse devant un
+        // `{ start?: string }` : un JSON qui n'est pas un objet, et un `start`
+        // qui n'est pas une chaine. Le `$type<{ start?: string }>()` de la
+        // source n'y change rien : c'est un typage statique, efface a la
+        // compilation, et `mode: "json"` n'y applique que `JSON.parse`.
+        for invalide in [r#"[]"#, r#""x""#, r#"{"start":1}"#, "nope"] {
             assert!(
                 matches!(decode_commands(invalide), Err(ColumnError::Json(_))),
                 "{invalide} ne devrait pas se decoder"
             );
         }
+        // En revanche une cle etrangere a `start` n'est pas un refus : c'est
+        // une absence de `start`. Le codec ignore le champ inconnu, et rend
+        // exactement ce que rendrait en JavaScript un acces a `.start` sur
+        // `{ demarrage: "x" }`, c'est-a-dire `undefined`.
+        assert_eq!(
+            decode_commands(r#"{"demarrage":"x"}"#).unwrap(),
+            ProjectCommands::default()
+        );
     }
 
     #[test]

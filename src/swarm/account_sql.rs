@@ -514,19 +514,28 @@ pub enum Expiration {
 /// C'est la violation de la cle primaire de `account`, vue sur les donnees - et
 /// c'est aussi la fonction qui rend visible le piege du fichier.
 ///
-/// Le detail qui compte est le retour `Some(None)` : **deux lignes sans
-/// identifiant ne sont pas un doublon**. La cle primaire de `account` est
-/// `id text PRIMARY KEY` sans `NOT NULL`, SQLite y accepte `NULL`, et le moteur
-/// ne considere pas deux `NULL` comme egaux pour une contrainte d'unicite. La
-/// cle primaire n'y garantit donc strictement rien.
+/// Le detail qui compte est qu'une ligne **sans** identifiant n'entre jamais en
+/// collision, y compris avec une autre ligne sans identifiant. La cle primaire
+/// de `account` est `id text PRIMARY KEY` sans `NOT NULL`, SQLite y accepte
+/// `NULL`, et le moteur ne considere pas deux `NULL` comme egaux pour une
+/// contrainte d'unicite. La cle primaire n'y garantit donc strictement rien.
+///
+/// Le type de retour garde malgre tout son `Option` interieur : seule la
+/// variante `Some(Some(id))` est atteignable, mais la distinguer de `None`
+/// reste ce qui permet au appelant de dire *quelle* ligne est en double.
 ///
 /// "Premiere" signifie premiere dans l'ordre de la tranche, ce qui rend le
 /// resultat stable et dependant uniquement de l'ordre de lecture.
 pub fn first_duplicate_by_id(rows: &[AccountRow]) -> Option<Option<String>> {
-    let mut vues: BTreeSet<&Option<String>> = BTreeSet::new();
+    let mut vues: BTreeSet<&str> = BTreeSet::new();
     for row in rows {
-        if !vues.insert(&row.id) {
-            return Some(row.id.clone());
+        // Une ligne sans identifiant saute le jeu : c'est ce `continue` qui
+        // reproduit le comportement de SQLite sur les `NULL`.
+        let Some(id) = row.id.as_deref() else {
+            continue;
+        };
+        if !vues.insert(id) {
+            return Some(Some(id.to_string()));
         }
     }
     None
@@ -944,8 +953,13 @@ mod tests {
     fn les_deux_drapneaux_sont_independants_et_leur_reunion_decide_de_null() {
         // Le tableau complet des quatre cas. C'est la table de verite du
         // modele, et elle tient en quatre lignes.
+        //
         //               notNull ecrit | cle primaire | NULL admis ?
-        assert!(admet_null_sans_pragma(true, false), "notNull ecrit refuse NULL");
+        //                       oui      |      non     |     non
+        //                       oui      |      oui     |     oui
+        //                       non      |      non     |     oui
+        //                       non      |      oui     |     oui
+        assert!(!admet_null_sans_pragma(true, false), "notNull ecrit refuse NULL");
         assert!(!admet_null_sans_pragma(true, true), "NOT NULL l emporte sur PRIMARY KEY");
         assert!(admet_null_sans_pragma(false, false), "rien n est ecrit, rien n interdit");
         assert!(admet_null_sans_pragma(false, true), "PRIMARY KEY n emporte PAS NOT NULL");
@@ -970,11 +984,12 @@ mod tests {
     }
 
     #[test]
-    fn les_listes_de_drapaux_ne_nominent_que_des_colonnes_reelles_et_jamais_les_deux() {
-        // Une colonne ne peut pas porter les deux drapeaux dans le DDL de ces
-        // trois tables : `notNull` ecrit disparait quand `primaryKey` est pose.
-        // Ce test echoue si quelqu'un ajoute une colonne aux deux listes, ou un
-        // nom de colonne qui n existe pas.
+    fn les_listes_de_drapaux_ne_nominent_que_des_colonnes_reelles() {
+        // Chaque liste ne cite que des colonnes de sa table. Ce test echoue si
+        // quelqu'un invente un nom de colonne.
+        //
+        // Il ne dit rien du recouvrement des deux drapeaux : voir le test
+        // suivant, car le recouvrement existe et la source l'ecrit.
         for (colonnes, not_null, primaires) in [
             (
                 ACCOUNT_COLUMNS.as_slice(),
@@ -992,12 +1007,45 @@ mod tests {
                 CONTROL_ACCOUNT_PRIMARY_KEY.as_slice(),
             ),
         ] {
-            for nom in not_null {
+            for nom in not_null.iter().chain(primaires.iter()) {
                 assert!(colonnes.contains(nom), "{nom} doit etre une colonne de la table");
-                assert!(!primaires.contains(nom), "{nom} ne peut pas porter les deux drapeaux");
             }
-            for nom in primaires {
-                assert!(colonnes.contains(nom), "{nom} doit etre une colonne de la table");
+        }
+    }
+
+    #[test]
+    fn le_recouvrement_des_deux_drapaux_est_exactement_la_cle_primaire_composite() {
+        // La source ecrit `notNull()` sur `email` et `url`, puis pose
+        // `primaryKey({ columns: [table.email, table.url] })`. Les deux colonnes
+        // portent donc les deux drapeaux, et le DDL garde les deux predicats :
+        //
+        //   `email` text NOT NULL,
+        //   `url` text NOT NULL,
+        //   CONSTRAINT `control_account_pk` PRIMARY KEY(`email`, `url`)
+        //
+        // Inversement, `account` et `account_state` ont une cle primaire
+        // simple, ecrite sans `notNull()`, et ne se recouvrent donc pas. C'est
+        // la seule difference entre les deux formes de cle du fichier.
+        let mut recouvrement: Vec<&str> = CONTROL_ACCOUNT_NOT_NULL_DECLARES
+            .iter()
+            .copied()
+            .filter(|nom| CONTROL_ACCOUNT_PRIMARY_KEY.contains(nom))
+            .collect();
+        recouvrement.sort_unstable();
+        assert_eq!(recouvrement, ["email", "url"]);
+
+        for (not_null, primaires) in [
+            (
+                ACCOUNT_NOT_NULL_DECLARES.as_slice(),
+                ACCOUNT_PRIMARY_KEY.as_slice(),
+            ),
+            (
+                ACCOUNT_STATE_NOT_NULL_DECLARES.as_slice(),
+                ACCOUNT_STATE_PRIMARY_KEY.as_slice(),
+            ),
+        ] {
+            for nom in not_null {
+                assert!(!primaires.contains(nom), "{nom} ne peut pas porter les deux drapeaux");
             }
         }
     }
